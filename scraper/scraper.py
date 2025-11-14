@@ -27,11 +27,11 @@ def scrape(pageurl: str):
         soup = BeautifulSoup(response.text, 'html.parser')
         link = soup.select('a')
         process_scrape(soup)
-        # if extract_domain(pu) == extract_domain(pageurl): #Recur
-        #     for x in link:
-        #         y = x.get('href')
-        #         if y not in memo:
-        #             scr(y)
+        if extract_domain(pu) == extract_domain(pageurl): #Recur
+            for x in link:
+                y = x.get('href')
+                if y not in memo:
+                    scr(y)
     scr(pageurl)
 
 def extract_domain(url):
