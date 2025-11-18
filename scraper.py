@@ -86,34 +86,6 @@ async def scrape_async(start_urls):
                 yield chunk
 
 
-def scrape(pageurl: str):
-    memo = set()
-    def scr(pu):
-        if not is_valid_scheme(pu): 
-            #print(f"BAD URL: {pu}")
-            return None
-        memo.add(pu)
-        response = requests.get(pu)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        link = soup.select('a')
-        process_scrape(soup, pu)
-        if extract_domain(pu) == extract_domain(pageurl): #Recur
-            for x in link:
-                y = x.get('href')
-                if y is None:
-                    continue
-            
-            # Convert to string explicitly if it might be bytes
-                if isinstance(y, bytes):
-                    try:
-                        y = y.decode('utf-8')
-                    except UnicodeDecodeError:
-                        # Handle cases where decoding fails, maybe skip the link
-                        continue
-                if y not in memo:
-                    scr(y)
-    scr(pageurl)
-
 def extract_domain(url):
     return urlparse(url).netloc
 def is_valid_scheme(url):
