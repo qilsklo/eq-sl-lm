@@ -15,86 +15,52 @@ from bs4 import BeautifulSoup
 import asyncio
 import aiohttp
 import re
-from urllib.parse import urlparse,urljoin
+from urllib.parse import urlparse
 from pymilvus import MilvusClient, FieldSchema, CollectionSchema, DataType, model
+from chunking import *
 
 collection_name = "myshake"
 client = MilvusClient("myshake.db")
 embedding_fn = model.DefaultEmbeddingFunction()
 
-MAX_CONCURRENT_REQUESTS = 5
-BATCH_SIZE = 50 # Chunks per Milvus insert
-DOMAIN_LIMIT = 1 # Only crawl 1 level deep on the starting domain
-
-async def scrape_async(start_urls):
-    """
-    Asynchronously crawls URLs, processes content, and yields chunks.
-    """
-    to_visit = asyncio.Queue()
-    visited = set()
-    base_domains = {extract_domain(url) for url in start_urls}
-    
-    # Initialize the queue
-    for url in start_urls:
-        if is_valid_scheme(url) and url not in visited:
-            to_visit.put_nowait(url)
-            visited.add(url)
-            
-    async with aiohttp.ClientSession() as session:
-        
-        # Worker function to handle fetching and processing
-        async def worker():
-            nonlocal to_visit, visited
-            
-            while not to_visit.empty():
-                url = await to_visit.get()
-                current_domain = extract_domain(url)
-                
-                print(f"Scraping: {url}")
-                
-                content, final_url = await fetch(session, url)
-                if not content:
+def scrape(pageurl: str):
+    memo = set()
+    def scr(pu):
+        if not is_valid_scheme(pu): 
+            #print(f"BAD URL: {pu}")
+            return None
+        memo.add(pu)
+        response = requests.get(pu)
+        if ".pdf" in pu:
+            process_scrape_pdf(response, pu)
+            return
+        soup = BeautifulSoup(response.text, 'html.parser')
+        link = soup.select('a')
+        process_scrape_html(soup, pu)
+        if extract_domain(pu) == extract_domain(pageurl): #Recur
+            for x in link:
+                y = x.get('href')
+                if y is None:
                     continue
-
-                soup = BeautifulSoup(content, 'html.parser')
-                
-                # Yield the scraped data for batch processing
-                for chunk in chunk_soup(soup, final_url):
-                    yield chunk
-
-                # Find new links andfor chunk in ch add them to the queue
-                if current_domain in base_domains:
-                    for link_tag in soup.select('a'):
-                        href = link_tag.get('href')
-                        if href:
-                            # Resolve relative URLs
-                            new_url = urljoin(final_url, href)
-                            
-                            # Check domain and scheme validity
-                            if extract_domain(new_url) in base_domains and is_valid_scheme(new_url):
-                                if new_url not in visited:
-                                    visited.add(new_url)
-                                    to_visit.put_nowait(new_url)
-        
-        # Start multiple workers concurrently
-        workers = [worker() for _ in range(MAX_CONCURRENT_REQUESTS)]
-        
-        # Gather the results from the workers' generators
-        # This structure allows workers to run non-blockingly while yielding chunks
-        for worker_gen in workers:
-            async for chunk in worker_gen:
-                yield chunk
-
+            
+            # Convert to string explicitly if it might be bytes
+                if isinstance(y, bytes):
+                    try:
+                        y = y.decode('utf-8')
+                    except UnicodeDecodeError:
+                        # Handle cases where decoding fails, maybe skip the link
+                        continue
+                if y not in memo:
+                    scr(y)
+    scr(pageurl)
 
 def extract_domain(url):
     return urlparse(url).netloc
 def is_valid_scheme(url):
     x = urlparse(url).scheme
     return "http" in x
-def process_scrape(soup, url):
-
-    elements = soup.select("h1, h2, h3, h4, h5, h6, p, li")
-    if not elements: return
+def process_scrape_html(soup, url):
+    
     chunks = chunk_soup(soup, url) # an array of dicts
     db_success = db_store(chunks)
     print(f"Visited page; soup hash: {hash(soup)}")
@@ -109,16 +75,15 @@ def chunk_soup(soup, url):
     1. Take the soup, and create a dict {url, heading, html_snippet}
     2. for each chunk create a dictionary that includes all this info 
     """
-    elements = soup.select("h1, h2, h3, h4, h5, h6, p, li") 
-    if not elements:
-        return []
+    
     chunks = [] # an array of strings. A chunk is a string which started with an html heading
     current_chunk = []
     current_section_title = ""
+    elements = soup.select("h1, h2, h3, h4, h5, h6, p, li")
 
     for el in elements:
         text = el.get_text(" ", strip=True)
-
+        print(text, end="-----------\n\n")
         if el.name.startswith("h"):
             # start a ne0w section
 
@@ -146,12 +111,7 @@ def chunk_soup(soup, url):
         chunks.append("\n".join(current_chunk))
     #[print(c, end="\n\n") for c in chunks]
     
-    chunkst = []
-    for i in range(len(chunks)):
-        chunkst.append({"chktext":chunks[i],"origin":url})
-    chunks = chunkst
-
-    return chunks
+    return [{"chktext": c, "origin":url} for c in chunks]
 
 
 def db_store(chunks): # This duplicates info btw
@@ -164,7 +124,7 @@ def db_store(chunks): # This duplicates info btw
     for i in range(len(chunks)):
         chunks[i]["vector"] = vectors[i]
 
-    res = client.insert(collection_name=collection_name,data=chunks)
+    res = client.insert(collection_name="myshake",data=chunks)
     print(res)
 
     # store in vectordb
@@ -210,47 +170,12 @@ def init_collection():
     client.create_index(collection_name=collection_name, index_params=index_params)
     print(f"Collection '{collection_name}' created and 'vector' field indexed.")
 
-async def fetch(session, url):
-    try:
-        async with session.get(url, timeout=10) as response:
-            if response.status != 200:
-                print(f"Failed to fetch {url} with status: {response.status}")
-                return None, None
-            content = await response.text()
-            final_url = str(response.url)
-            return content, final_url
-    except Exception as e:
-        print(f"Error fetching {url}: {e}")
-        return None, None
-
 
 if __name__ == '__main__':
 
     init_collection()
-    start_urls = [
-        "https://www.earthquakecountry.org/",
-        "https://www.usgs.gov/programs/earthquake-hazards/faqs-category"
-    ]
-    all_chunks = []
-    
-    # Run the asynchronous scraper and collect chunks
-    # Note: We must use a coroutine to iterate over the async generator
-    async def main_run():
-        global all_chunks
-        async for chunk in scrape_async(start_urls):
-            all_chunks.append(chunk)
-            
-            # Check if we've reached the batch size limit
-            if len(all_chunks) >= BATCH_SIZE:
-                print(f"Batch limit reached ({BATCH_SIZE}). Inserting...")
-                db_store(all_chunks)
-                all_chunks = [] # Reset batch list
-
-    asyncio.run(main_run())
-    
-    # Insert any remaining chunks after the scraping is complete
-    if all_chunks:
-        print(f"Scraping complete. Inserting final batch of {len(all_chunks)} chunks...")
-        db_store(all_chunks)
-
-    print("Scraping and ingestion complete.")
+    #u = input("Ente0r URL to scrape recursively (1-level depth): ")
+    #u = ["https://www.usgs.gov/programs/earthquake-hazards/faqs-category"]
+    u = ["https://www.earthquakecountry.org/"]
+    for l in u:
+        scrape(l)

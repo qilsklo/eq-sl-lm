@@ -12,7 +12,7 @@ def answer_query(query):
     res = client.search(
         collection_name=collection_name,
         data=query_vectors,
-        limit=5,
+        limit=3,
         output_fields=["chktext", "origin"],
     )
 
