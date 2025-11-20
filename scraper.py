@@ -359,7 +359,8 @@ if __name__ == '__main__':
 
     init_collection()
     #u = input("Ente0r URL to scrape recursively (1-level depth): ")
-    #u = ["https://www.usgs.gov/programs/earthquake-hazards/faqs-category"]
-    u =["https://www.earthquakecountry.org/"]
+    #u = []
+    u =["https://www.earthquakecountry.org/",
+        "https://www.usgs.gov/programs/earthquake-hazards/faqs-category"]
     for l in u:
         scrape(l)

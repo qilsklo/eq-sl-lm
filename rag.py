@@ -19,6 +19,7 @@ def answer_query(query):
     return res
 
 if __name__ == '__main__':
-    while True:
-        q = input("Enter your query: ")
-        print(answer_query(q))
+    with open('ragprompts.txt', 'r', encoding='utf-8') as ragprompts:
+        for line in ragprompts:
+            print(f"Query: {line}")
+            print(answer_query(line))
