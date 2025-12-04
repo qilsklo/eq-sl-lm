@@ -21,6 +21,9 @@ import tiktoken
 from bs4 import NavigableString
 import io
 import pdfprocessor
+import os
+import glob
+import pypdf
 
 
 import datetime
@@ -29,7 +32,6 @@ MONTH_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_mont
 HOUR_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_hour.geojson"
 
 collection_name = "myshake"
-PROCESSED_URLS_COLLECTION = "processed_urls"
 client = MilvusClient("myshake.db")
 embedding_fn = model.DefaultEmbeddingFunction()  # sentence-transformers/all-MiniLM-L6-v2 - 256 token max
 max_tokens = 450
@@ -40,16 +42,6 @@ def scrape(pageurl: str):
         if not is_valid_scheme(pu): 
             #print(f"BAD URL: {pu}")
             return None
-        
-        # Check if already processed
-        try:
-            res = client.get(collection_name=PROCESSED_URLS_COLLECTION, ids=[pu])
-            if res:
-                print(f"Skipping already processed URL: {pu}")
-                return
-        except Exception as e:
-            print(f"Error checking processed URLs: {e}")
-
         memo.add(pu)
         try:
             response = requests.get(pu)
@@ -77,13 +69,6 @@ def scrape(pageurl: str):
                         continue
                 if y not in memo:
                     scr(y)
-        
-        # Mark as processed
-        try:
-            client.insert(collection_name=PROCESSED_URLS_COLLECTION, data=[{"url": pu}])
-        except Exception as e:
-            print(f"Error inserting processed URL {pu}: {e}")
-
     scr(pageurl)
 
 def process_scrape_pdf(resp):
@@ -91,6 +76,18 @@ def process_scrape_pdf(resp):
     chunks = pdfprocessor.chunk_pdf(reader, resp.url, embedding_fn.tokenizer, max_tokens)
     if chunks: db_store(chunks)
     print(f"Processed PDF; URL: {resp.url}.")
+
+def process_local_pdf(filepath):
+    try:
+        reader = pypdf.PdfReader(filepath)
+        # Create a file URI for the origin
+        file_uri = f"file://{os.path.abspath(filepath)}"
+        chunks = pdfprocessor.chunk_pdf(reader, file_uri, embedding_fn.tokenizer, max_tokens)
+        if chunks:
+            db_store(chunks)
+        print(f"Processed local PDF: {filepath}")
+    except Exception as e:
+        print(f"Failed to process local PDF {filepath}: {e}")
 
 
 
@@ -391,27 +388,19 @@ def init_collection():
         db_store(chunks)
 
 
-def init_processed_urls_collection():
-    if client.has_collection(collection_name=PROCESSED_URLS_COLLECTION):
-        print(f"Collection '{PROCESSED_URLS_COLLECTION}' already exists.")
-        return
-
-    fields = [
-        FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=4096, is_primary=True, auto_id=False),
-    ]
-    schema = CollectionSchema(fields, description="Track processed URLs to avoid re-scraping")
-    client.create_collection(collection_name=PROCESSED_URLS_COLLECTION, schema=schema)
-    print(f"Collection '{PROCESSED_URLS_COLLECTION}' created.")
-
-
 if __name__ == '__main__':
 
     init_collection()
-    init_processed_urls_collection()
+
+    # Process local PDFs first
+    pdf_files = glob.glob("docs/*.pdf")
+    print(f"Found {len(pdf_files)} local PDF files in docs/")
+    for pdf_file in pdf_files:
+        process_local_pdf(pdf_file)
+
     u =["https://www.earthquakecountry.org/",
         "https://www.usgs.gov/programs/earthquake-hazards/faqs-category",
         "myshake.berkeley.edu",
-        "seismo.berkeley.edu",
-        "https://dl.icdst.org/pdfs/files3/89106f77bcf4408765909e5471ce7c5f.pdf"]
+        "seismo.berkeley.edu"]
     for l in u:
         scrape(l)
