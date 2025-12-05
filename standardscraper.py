@@ -238,6 +238,9 @@ def chunk_soup(soup, url):
                     "origin": url,
                     "heading": current_heading,
                     "html_snippet": html_snip,
+                    "date_utc": "",
+                    "magnitude": 0.0,
+                    "location": ""
                 })
             # 2. Update heading for the next block
             current_heading = el.get_text(strip=True) or "Untitled Section"
@@ -258,6 +261,9 @@ def chunk_soup(soup, url):
                     "origin": url,
                     "heading": current_heading,
                     "html_snippet": html_snip,
+                    "date_utc": "",
+                    "magnitude": 0.0,
+                    "location": ""
                 })
 
             # 2. Process the list (which is now self-contained)
@@ -278,6 +284,9 @@ def chunk_soup(soup, url):
                         "origin": url,
                         "heading": current_heading,
                         "html_snippet": html_snippet,
+                        "date_utc": "",
+                        "magnitude": 0.0,
+                        "location": ""
                     })
 
     # 3. Final flush for any remaining buffered paragraphs
@@ -288,6 +297,9 @@ def chunk_soup(soup, url):
             "origin": url,
             "heading": current_heading,
             "html_snippet": html_snip,
+            "date_utc": "",
+            "magnitude": 0.0,
+            "location": ""
         })
 
     return all_chunks
@@ -328,7 +340,10 @@ def fetch_earthquake_feed(url):
                     "chktext": text,
                     "origin": origin,
                     "heading": "Earthquake Report",
-                    "html_snippet": text # Using text as snippet for now
+                    "html_snippet": text, # Using text as snippet for now
+                    "date_utc": time_str,
+                    "magnitude": float(props['mag']) if props['mag'] is not None else 0.0,
+                    "location": props['place'] or "Unknown"
                 })
             except Exception as e:
                 print(f"Error processing feature: {e}")
@@ -359,6 +374,10 @@ def init_collection():
         FieldSchema(name="origin", dtype=DataType.VARCHAR, max_length=512),
         FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
         FieldSchema(name="html_snippet", dtype=DataType.VARCHAR, max_length=513),
+        # New fields for structured filtering
+        FieldSchema(name="date_utc", dtype=DataType.VARCHAR, max_length=32), # ISO 8601 format
+        FieldSchema(name="magnitude", dtype=DataType.FLOAT),
+        FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=512),
     ]
 
     schema = CollectionSchema(fields, description="Earthquake website scraped data")
