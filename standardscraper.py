@@ -391,8 +391,8 @@ def init_collection():
 if __name__ == '__main__':
 
     init_collection()
-
-    # Process local PDFs first
+    
+    #Process local PDFs first
     pdf_files = glob.glob("docs/*.pdf")
     print(f"Found {len(pdf_files)} local PDF files in docs/")
     for pdf_file in pdf_files:

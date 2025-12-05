@@ -60,6 +60,24 @@ def perform_vector_search(query, limit=5):
             chunks.append(hit['entity']['chktext'])
     return chunks
 
+def perform_filtered_search(query, filter_expr, limit=5):
+    """
+    Performs vector search with a filter.
+    """
+    query_vectors = standardscraper.embedding_fn.encode_queries([query])
+    res = standardscraper.client.search(
+        collection_name=standardscraper.collection_name,
+        data=query_vectors,
+        limit=limit,
+        filter=filter_expr,
+        output_fields=["chktext"]
+    )
+    chunks = []
+    for hits in res:
+        for hit in hits:
+            chunks.append(hit['entity']['chktext'])
+    return chunks
+
 def query_rag(user_query, history, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.0-flash')
@@ -81,11 +99,21 @@ def query_rag(user_query, history, api_key):
         context_chunks.append(f"[LATEST REPORT] {eq['chktext']}")
         
     # 2. Vector Search (for specific/scientific queries)
-    search_chunks = perform_vector_search(user_query, limit=3)
+    # General search
+    search_chunks = perform_vector_search(user_query, limit=5)
     for chunk in search_chunks:
         context_chunks.append(f"[SEARCH RESULT] {chunk}")
+
+    # Specific search for earthquake reports (to avoid PDF noise)
+    report_chunks = perform_filtered_search(user_query, filter_expr='heading == "Earthquake Report"', limit=5)
+    for chunk in report_chunks:
+        # Avoid duplicates
+        formatted_chunk = f"[SEARCH RESULT] {chunk}"
+        if formatted_chunk not in context_chunks:
+            context_chunks.append(formatted_chunk)
         
     context_text = "\n\n".join(context_chunks)
+    # print(f"[DEBUG] Context Text:\n{context_text}\n[DEBUG] End Context")
     
     # 3. Generate Answer
     # 3. Generate Answer
