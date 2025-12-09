@@ -1,15 +1,3 @@
-"""
-to scrape
-https://www.earthquakecountry.org/
-https://www.usgs.gov/programs/earthquake-hazards/faqs-category
-maybe go one level deep into links on this site
-- all headings
-- all paragraphs
-- all lists (ul, ol) and their list items (li)
-
-"""
-
-
 import requests
 from bs4 import BeautifulSoup, Tag
 import asyncio
@@ -24,6 +12,7 @@ import pdfprocessor
 import os
 import glob
 import pypdf
+from collections import deque
 
 
 import datetime
@@ -32,44 +21,165 @@ MONTH_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_mont
 HOUR_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_hour.geojson"
 
 collection_name = "myshake"
+processed_urls_collection = "processed_urls"
 client = MilvusClient("myshake.db")
 embedding_fn = model.DefaultEmbeddingFunction()  # sentence-transformers/all-MiniLM-L6-v2 - 256 token max
 max_tokens = 450
 
-def scrape(pageurl: str):
-    memo = set()
-    def scr(pu):
-        if not is_valid_scheme(pu): 
-            #print(f"BAD URL: {pu}")
-            return None
-        memo.add(pu)
+def scrape(start_urls):
+    if isinstance(start_urls, str):
+        start_urls = [start_urls]
+        
+    queue = deque()
+    
+    # 1. Load pending URLs from DB
+    pending_urls = get_pending_urls()
+    print(f"Loaded {len(pending_urls)} pending URLs from database.")
+    for url in pending_urls:
+        queue.append(url) # Pending URLs from DB are assumed to be normalized when inserted
+        
+    # 2. Add start_urls if not already in DB
+    for url in start_urls:
+        norm_url = normalize_url(url)
+        if not is_url_known(norm_url):
+            add_url_to_db(norm_url, status=0) # 0 = Pending
+            queue.append(norm_url)
+    
+    print(f"Starting scrape with {len(queue)} items in queue.")
+
+    while queue:
+        url = queue.popleft()
+        # url from queue should already be normalized
+        
+        # Double check status
+        if is_url_processed(url):
+            print(f"Skipping already processed URL: {url}")
+            continue
+
+        if not is_valid_scheme(url):
+            mark_url_processed(url) 
+            continue
+
+        print(f"Processing: {url}")
         try:
-            response = requests.get(pu)
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                print(f"Failed to fetch {url}: Status {response.status_code}")
+                mark_url_processed(url) 
+                continue
         except Exception as e:
-            print(f"Failed to fetch {pu} at time [{str(datetime.datetime.now())}]: {e}")
-            return
-        if ".pdf" in pu:
+            print(f"Failed to fetch {url} at time [{str(datetime.datetime.now())}]: {e}")
+            mark_url_processed(url)
+            continue
+
+        if ".pdf" in url:
             process_scrape_pdf(response)
-            return
+            mark_url_processed(url)
+            continue
+            
         soup = BeautifulSoup(response.text, 'html.parser')
-        link = soup.select('a')
-        process_scrape_html(soup, pu)
-        if extract_domain(pu) == extract_domain(pageurl): #Recur
-            for x in link:
-                y = x.get('href')
-                if y is None:
+        process_scrape_html(soup, url)
+        
+        # Extract links
+        current_domain = extract_domain(url)
+        links = soup.select('a')
+        for x in links:
+            href = x.get('href')
+            if href is None:
+                continue
+            
+            if isinstance(href, bytes):
+                try:
+                    href = href.decode('utf-8')
+                except UnicodeDecodeError:
                     continue
-           
-            # Convert to string explicitly if it might be bytes
-                if isinstance(y, bytes):
-                    try:
-                        y = y.decode('utf-8')
-                    except UnicodeDecodeError:
-                        # Handle cases where decoding fails, maybe skip the link
-                        continue
-                if y not in memo:
-                    scr(y)
-    scr(pageurl)
+            
+            if href.startswith('/'):
+                parsed_uri = urlparse(url)
+                base = '{uri.scheme}://{uri.netloc}'.format(uri=parsed_uri)
+                href = base + href
+            elif not href.startswith('http'):
+                if not href.startswith('mailto:') and not href.startswith('tel:'):
+                     href = url.rsplit('/', 1)[0] + '/' + href
+
+            # Normalize the extracted link
+            norm_href = normalize_url(href)
+            
+            if extract_domain(norm_href) == current_domain:
+                if not is_url_known(norm_href):
+                    add_url_to_db(norm_href, status=0) # Add as pending
+                    queue.append(norm_href)
+        
+        # Mark current URL as processed
+        mark_url_processed(url)
+
+def normalize_url(url):
+    try:
+        parsed = urlparse(url)
+        # Lowercase scheme and netloc
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path
+        
+        # Remove trailing slash from path
+        if path and path.endswith('/'):
+            path = path[:-1]
+            
+        # Reconstruct without fragment
+        # scheme://netloc/path;parameters?query
+        # We ignore params for now as they are rarely used in this context
+        # We keep query params as they might be significant
+        
+        normalized = f"{scheme}://{netloc}{path}"
+        if parsed.query:
+            normalized += f"?{parsed.query}"
+            
+        return normalized
+    except:
+        return url
+
+def is_url_known(url):
+    res = client.query(
+        collection_name=processed_urls_collection,
+        filter=f'url == "{url}"',
+        output_fields=["url"]
+    )
+    return len(res) > 0
+
+def is_url_processed(url):
+    res = client.query(
+        collection_name=processed_urls_collection,
+        filter=f'url == "{url}" and status == 1',
+        output_fields=["url"]
+    )
+    return len(res) > 0
+
+def get_pending_urls():
+    # Fetch all URLs with status 0
+    # Note: Milvus query limit might need pagination for large sets, 
+    # but for now let's grab a reasonable batch.
+    res = client.query(
+        collection_name=processed_urls_collection,
+        filter='status == 0',
+        output_fields=["url"],
+        limit=10000 # Cap for now
+    )
+    return [r["url"] for r in res]
+
+def add_url_to_db(url, status=0):
+    client.insert(
+        collection_name=processed_urls_collection,
+        data=[{"url": url, "status": status}]
+    )
+
+def mark_url_processed(url):
+    # Milvus doesn't support update/partial update easily in all versions.
+    # We typically delete and re-insert, or use upsert if available.
+    # MilvusClient.upsert() is available in newer SDKs.
+    client.upsert(
+        collection_name=processed_urls_collection,
+        data=[{"url": url, "status": 1}]
+    )
 
 def process_scrape_pdf(resp):
     reader = pypdf.PdfReader(io.BytesIO(resp.content))
@@ -94,8 +204,12 @@ def process_local_pdf(filepath):
 def extract_domain(url):
     return urlparse(url).netloc
 def is_valid_scheme(url):
-    x = urlparse(url).scheme
-    return "http" in x
+    try:
+        x = urlparse(url).scheme
+        return "http" in x
+    except:
+        return False
+        
 def process_scrape_html(soup, url):
     
     chunks = chunk_soup(soup, url) # an array of dicts
@@ -357,69 +471,83 @@ def fetch_earthquake_feed(url):
 
 def init_collection():
     
-    if client.has_collection(collection_name=collection_name):
-        print("init_collection skipped; collection already exists.")
-        return
+    # 1. Main Data Collection
+    if not client.has_collection(collection_name=collection_name):
+        fields = [
+            # Primary Key field - MUST be set with auto_id=True for automatic ID generation
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            
+            # Vector field (Dimension 768)
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=768),
+            
+            # Scalar fields to store chunk text and origin URL
+            # The Milvus Lite (SQLite) backend used with MilvusClient requires scalar fields to be defined.
+            FieldSchema(name="chktext", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="origin", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="html_snippet", dtype=DataType.VARCHAR, max_length=513),
+            # New fields for structured filtering
+            FieldSchema(name="date_utc", dtype=DataType.VARCHAR, max_length=32), # ISO 8601 format
+            FieldSchema(name="magnitude", dtype=DataType.FLOAT),
+            FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=512),
+        ]
 
-    fields = [
-        # Primary Key field - MUST be set with auto_id=True for automatic ID generation
-        FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+        schema = CollectionSchema(fields, description="Earthquake website scraped data")
+        client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+        )
+
+        index_params = client.prepare_index_params()
         
-        # Vector field (Dimension 768)
-        FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=768),
-        
-        # Scalar fields to store chunk text and origin URL
-        # The Milvus Lite (SQLite) backend used with MilvusClient requires scalar fields to be defined.
-        FieldSchema(name="chktext", dtype=DataType.VARCHAR, max_length=65535),
-        FieldSchema(name="origin", dtype=DataType.VARCHAR, max_length=512),
-        FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
-        FieldSchema(name="html_snippet", dtype=DataType.VARCHAR, max_length=513),
-        # New fields for structured filtering
-        FieldSchema(name="date_utc", dtype=DataType.VARCHAR, max_length=32), # ISO 8601 format
-        FieldSchema(name="magnitude", dtype=DataType.FLOAT),
-        FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=512),
-    ]
+        # Use AUTOINDEX index for the vector field (because i'm running the db locally, should change to HNSW later)
+        index_params.add_index(
+            field_name="vector", 
+            index_type="AUTOINDEX", # Not a High-Performance Index Type
+            metric_type="COSINE" # Metric for distance calculation
+        )
 
-    schema = CollectionSchema(fields, description="Earthquake website scraped data")
-    client.create_collection(
-        collection_name=collection_name,
-        schema=schema,
-        # Note: If you want to use Index Types other than FLAT, you'd specify them here.
-    )
+        # Apply the index to the collection
+        client.create_index(collection_name=collection_name, index_params=index_params)
+        print(f"Collection '{collection_name}' created and 'vector' field indexed.")
 
-    index_params = client.prepare_index_params()
-    
-    # Use AUTOINDEX index for the vector field (because i'm running the db locally, should change to HNSW later)
-    index_params.add_index(
-        field_name="vector", 
-        index_type="AUTOINDEX", # Not a High-Performance Index Type
-        metric_type="COSINE" # Metric for distance calculation
-    )
+        # Initial load of month feed
+        print("Performing initial load of month feed...")
+        chunks = fetch_earthquake_feed(MONTH_FEED)
+        if chunks:
+            db_store(chunks)
+    else:
+        print(f"Collection '{collection_name}' already exists.")
 
-    # Apply the index to the collection
-    client.create_index(collection_name=collection_name, index_params=index_params)
-    print(f"Collection '{collection_name}' created and 'vector' field indexed.")
-
-    # Initial load of month feed
-    print("Performing initial load of month feed...")
-    chunks = fetch_earthquake_feed(MONTH_FEED)
-    if chunks:
-        db_store(chunks)
+    # 2. Processed URLs Collection (for persistence/deduplication)
+    if not client.has_collection(collection_name=processed_urls_collection):
+        url_fields = [
+            FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=2048, is_primary=True),
+            FieldSchema(name="status", dtype=DataType.INT64), # 0 = Pending, 1 = Processed
+        ]
+        url_schema = CollectionSchema(url_fields, description="Track processed URLs with status")
+        client.create_collection(
+            collection_name=processed_urls_collection,
+            schema=url_schema
+        )
+        print(f"Collection '{processed_urls_collection}' created with status field.")
+    else:
+        print(f"Collection '{processed_urls_collection}' already exists.")
 
 
 if __name__ == '__main__':
 
     init_collection()
     
-    #Process local PDFs first
-    pdf_files = glob.glob("docs/*.pdf")
-    print(f"Found {len(pdf_files)} local PDF files in docs/")
-    for pdf_file in pdf_files:
-        process_local_pdf(pdf_file)
+    # #Process local PDFs first
+    # pdf_files = glob.glob("docs/*.pdf")
+    # print(f"Found {len(pdf_files)} local PDF files in docs/")
+    # for pdf_file in pdf_files:
+    #     process_local_pdf(pdf_file)
 
     u =["https://www.earthquakecountry.org/",
         "https://www.usgs.gov/programs/earthquake-hazards/faqs-category",
-        "myshake.berkeley.edu",
-        "seismo.berkeley.edu"]
-    for l in u:
-        scrape(l)
+        "https://myshake.berkeley.edu",
+        "https://seismo.berkeley.edu"]
+    
+    scrape(u)
