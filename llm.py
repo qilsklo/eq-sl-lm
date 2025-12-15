@@ -115,6 +115,11 @@ def query_rag(user_query, history, api_key):
     end_date = search_params.get("end_date")
     semantic_query = search_params.get("semantic_query")
     user_coordinates = search_params.get("user_coordinates")
+    
+    # Default to UC Berkeley if no location specified
+    if not user_coordinates:
+        user_coordinates = [37.8715, -122.2730]
+        
     if not semantic_query:
         semantic_query = user_query
 

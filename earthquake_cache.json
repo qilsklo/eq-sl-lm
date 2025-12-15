@@ -3603,7 +3603,7 @@
     "62209737": {
       "event_id": "62209737",
       "origin_time_utc": "2025-12-15T15:06:20.990000+00:00",
-      "last_updated_utc": "2025-12-15T17:58:01.056000+00:00",
+      "last_updated_utc": "2025-12-15T18:11:12.958000+00:00",
       "magnitude": 2.6,
       "magnitude_type": "ml",
       "depth_km": 5.48,
@@ -3613,7 +3613,7 @@
       "review_status": "reviewed",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 10
+      "version": 11
     },
     "41352192": {
       "event_id": "41352192",
@@ -138798,7 +138798,7 @@
     "2025yqesfi": {
       "event_id": "2025yqesfi",
       "origin_time_utc": "2025-12-15T18:06:07.287000+00:00",
-      "last_updated_utc": "2025-12-15T18:08:14.297000+00:00",
+      "last_updated_utc": "2025-12-15T18:08:48.849000+00:00",
       "magnitude": 1.6,
       "magnitude_type": "ml",
       "depth_km": 4.4753,
@@ -138808,8 +138808,8 @@
       "review_status": "automatic",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 1
+      "version": 2
     }
   },
-  "last_saved": "2025-12-15T18:08:33.514097+00:00"
+  "last_saved": "2025-12-15T18:11:33.102796+00:00"
 }
