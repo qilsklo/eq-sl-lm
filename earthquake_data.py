@@ -99,6 +99,55 @@ def format_time_relative(timestamp_str: str) -> str:
     else:
         return f"{diff.days} days ago"
 
+def estimate_intensity(magnitude: float, distance_km: float) -> str:
+    """
+    Estimates the shaking intensity based on magnitude and distance.
+    This is a very rough approximation for user context.
+    """
+    if magnitude is None or distance_km is None:
+        return "Unknown"
+    
+    # Very rough attenuation model
+    # MMI approx = 1.5 * Mag - 3.7 * log10(dist) + C
+    # But let's use a simpler heuristic for "Felt" vs "Not Felt"
+    
+    # Felt radius approx: R = 10^( (Mag - 2.5) / 2 ) * 10 (very rough)
+    # Let's use a lookup table style heuristic
+    
+    if distance_km < 5:
+        if magnitude < 2.0: return "Not felt"
+        if magnitude < 3.0: return "Weak shaking"
+        if magnitude < 4.0: return "Moderate shaking"
+        if magnitude < 5.0: return "Strong shaking"
+        return "Violent shaking"
+        
+    if distance_km < 20:
+        if magnitude < 2.5: return "Not felt"
+        if magnitude < 3.5: return "Weak shaking"
+        if magnitude < 4.5: return "Moderate shaking"
+        return "Strong shaking"
+
+    if distance_km < 50:
+        if magnitude < 3.0: return "Not felt"
+        if magnitude < 4.0: return "Weak shaking"
+        if magnitude < 5.0: return "Moderate shaking"
+        return "Strong shaking"
+        
+    if distance_km < 100:
+        if magnitude < 4.0: return "Not felt"
+        if magnitude < 5.0: return "Weak shaking"
+        return "Moderate shaking"
+
+    if distance_km < 250:
+        if magnitude < 5.0: return "Not felt"
+        if magnitude < 6.0: return "Weak shaking"
+        return "Moderate shaking"
+        
+    # > 250km
+    if magnitude < 6.0: return "Not felt"
+    return "Weak shaking"
+
+
 # --- Data Ingestion ---
 
 class EarthquakeManager:
@@ -198,7 +247,7 @@ class EarthquakeManager:
     def get_event(self, event_id) -> Optional[EarthquakeEvent]:
         return self.cache.get(event_id)
 
-    def get_context_for_llm(self, event_id=None, user_lat=None, user_lon=None, min_magnitude=None, date_filter=None, limit=3):
+    def get_context_for_llm(self, event_id=None, user_lat=None, user_lon=None, min_magnitude=None, start_date=None, end_date=None, limit=3):
         """
         Constructs the structured JSON context for the LLM.
         If event_id is provided, focuses on that event.
@@ -227,8 +276,30 @@ class EarthquakeManager:
             if min_magnitude is not None:
                 candidates = [e for e in candidates if e.magnitude is not None and e.magnitude >= min_magnitude]
             
+            # Filter by date if requested
+            if start_date:
+                try:
+                    start_dt = datetime.datetime.fromisoformat(start_date)
+                    if start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=datetime.timezone.utc)
+                    candidates = [e for e in candidates if datetime.datetime.fromisoformat(e.origin_time_utc) >= start_dt]
+                except ValueError:
+                    pass # Ignore invalid dates
+            
+            if end_date:
+                try:
+                    end_dt = datetime.datetime.fromisoformat(end_date)
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.replace(tzinfo=datetime.timezone.utc)
+                    candidates = [e for e in candidates if datetime.datetime.fromisoformat(e.origin_time_utc) <= end_dt]
+                except ValueError:
+                    pass
+
             # Sort by time
             sorted_candidates = sorted(candidates, key=lambda x: x.origin_time_utc, reverse=True)
+            
+            # If date filter is active, we might want to show more events or just the limit
+            # For now, we stick to the limit but ensure we are picking from the filtered set
             events_to_include = sorted_candidates[:limit]
             
         # Get all events for aftershock check (naive approach, using all cache)
@@ -245,6 +316,7 @@ class EarthquakeManager:
             if user_lat is not None and user_lon is not None:
                 dist = calculate_distance(user_lat, user_lon, evt.latitude, evt.longitude)
                 evt_data["distance_to_user_km"] = round(dist, 1)
+                evt_data["estimated_felt_intensity"] = estimate_intensity(evt.magnitude, dist)
             
             context["events"].append(evt_data)
             

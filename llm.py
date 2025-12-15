@@ -53,6 +53,27 @@ import earthquake_data
 
 import earthquake_data
 
+def get_search_params(user_query, api_key):
+    """
+    Uses LLM to extract search parameters (date, magnitude, etc.) from the query.
+    """
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.0-flash')
+    
+    current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    prompt = prompts.SEARCH_PARAM_PROMPT.format(
+        current_datetime=current_time,
+        user_query=user_query
+    )
+    
+    try:
+        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+        params = json.loads(response.text)
+        return params
+    except Exception as e:
+        print(f"Error extracting params: {e}")
+        return {}
+
 def perform_vector_search(query, limit=3):
     """
     Performs standard vector search using standardscraper.
@@ -88,27 +109,44 @@ def query_rag(user_query, history, api_key):
         print(f"Error updating feed: {e}")
         # We continue, but the context will show 'stale' or 'unknown' if last fetch failed/didn't happen recently.
 
-    # 2. Get Context from EarthquakeManager
-    # We could still use the vector search for general knowledge if needed, 
-    # but the spec emphasizes USGS data. 
-    # For this implementation, we'll focus on the structured data context.
-    
-    # Extract magnitude constraint
-    min_mag = None
-    mag_match = re.search(r'(?:magnitude|mag|m)\s*(\d+(?:\.\d+)?)', user_query, re.IGNORECASE)
-    if mag_match:
-        try:
-            min_mag = float(mag_match.group(1))
-        except ValueError:
-            pass
+    # 2. Get Search Params
+    search_params = get_search_params(user_query, api_key)
+    start_date = search_params.get("start_date")
+    end_date = search_params.get("end_date")
+    semantic_query = search_params.get("semantic_query")
+    user_coordinates = search_params.get("user_coordinates")
+    if not semantic_query:
+        semantic_query = user_query
 
+    # 3. Get Context from EarthquakeManager
+    # Extract magnitude constraint
+    # First try from LLM params
+    min_mag = search_params.get("min_magnitude")
+    
+    # Fallback to regex if not found in params (and ensure regex is robust)
+    if min_mag is None:
+        # Regex: Look for 'magnitude', 'mag', 'm' followed by number, OR just 'M' followed by number
+        # Use word boundaries to avoid matching 'from' -> 'm'
+        mag_match = re.search(r'\b(?:magnitude|mag|m)\s*(\d+(?:\.\d+)?)', user_query, re.IGNORECASE)
+        if mag_match:
+            try:
+                min_mag = float(mag_match.group(1))
+            except ValueError:
+                pass
+    
     # Check if user is asking about a specific event (naive check, or use search params)
     # For now, we just give the latest context.
-    context_data = earthquake_data.manager.get_context_for_llm(min_magnitude=min_mag)
+    context_data = earthquake_data.manager.get_context_for_llm(
+        min_magnitude=min_mag,
+        start_date=start_date,
+        end_date=end_date,
+        user_lat=user_coordinates[0] if user_coordinates else None,
+        user_lon=user_coordinates[1] if user_coordinates else None
+    )
     event_context_json = json.dumps(context_data, indent=2)
     
-    # 3. Get Safety Docs via Vector Search
-    safety_docs = perform_vector_search(user_query, limit=3)
+    # 4. Get Safety Docs via Vector Search
+    safety_docs = perform_vector_search(semantic_query, limit=3)
     safety_context_text = "\n\n".join([f"[DOC {i+1}] {doc}" for i, doc in enumerate(safety_docs)])
 
     # Combine Contexts
@@ -120,7 +158,7 @@ def query_rag(user_query, history, api_key):
 {safety_context_text}
 """
     
-    # 4. Generate Answer
+    # 5. Generate Answer
     # Format history
     history_text = ""
     for role, msg in history:
