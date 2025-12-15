@@ -10,3 +10,4 @@ requests
 tiktoken
 tomli
 torch
+streamlit
