@@ -192,7 +192,7 @@ def query_rag(user_query, history, api_key):
                 context_chunks.append(formatted_chunk)
 
     # 3. Latest Earthquakes (Always good context)
-    recent_eqs = get_recent_earthquakes(limit=3)
+    recent_eqs = get_recent_earthquakes(limit=10)
     for eq in recent_eqs:
         context_chunks.append(f"[LATEST REPORT] {eq['chktext']}")
         
