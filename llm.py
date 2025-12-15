@@ -201,11 +201,16 @@ def query_rag(user_query, history, api_key):
     - [LATEST REPORT]: The most recent earthquakes recorded. Use this if the user asks for "latest", "recent", or "last few" earthquakes.
     - [SEARCH RESULT]: Information retrieved based on the user's query. Use this if it matches the user's topic (e.g., specific location, scientific concept).
 
-    Instructions:
+    Instructions:here's what to do in general during an earthquake, combined with information about earthquake preparedness at UC Berkeley:
     1. If the context contains highly relevant information (especially [SEARCH RESULT] or [LATEST REPORT]), **you must prioritize it** for your answer to ensure accuracy.
     2. **If the user asks for a definition, explanation, or concept (e.g., "What are P-waves?", "Explain subduction") OR the retrieved context is factually incomplete (e.g., the context contains no US reports, but the user asks about California), you are fully authorized to use your extensive internal knowledge base to provide a complete and accurate answer.** Do not deny the existence of widely known facts (e.g., that earthquakes occur in California) just because the context is silent. Use your internal knowledge to fill obvious factual gaps and ensure completeness.
-    3. For time-based questions (e.g., "Was it in the last week?"), use the **Current Date and Time** for accurate calculation against earthquake timestamps.
-    4. For follow-up questions (e.g., "Would I have felt it?"), combine the context (earthquake details) with your general knowledge (geography, physics).
+    3. **Handling Specific Locations (e.g., "McCone Hall basement"):** If the user asks about safety in a specific building or room and you lack a specific manual for it:
+       - **Do NOT start by saying "I don't have specific instructions for [Location]".** This is unhelpful.
+       - Instead, acknowledge the specific environment (e.g., "In a basement...", "In a lecture hall...") and apply general earthquake safety principles to that environment.
+       - For basements: Mention avoiding heavy equipment, chemicals, or shelves that could fall. Mention that exits might be different.
+       - ALWAYS emphasize "Drop, Cover, and Hold On" as the immediate action.
+    4. For time-based questions (e.g., "Was it in the last week?"), use the **Current Date and Time** for accurate calculation against earthquake timestamps.
+    5. For follow-up questions (e.g., "Would I have felt it?"), combine the context (earthquake details) with your general knowledge (geography, physics).
 
     Chat History:
     {history_text}
