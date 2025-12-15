@@ -170,11 +170,22 @@ def query_rag(user_query, history, api_key):
         history_text += f"{role}: {msg}\n"
     history_text += f"User: {user_query}"
 
-    prompt = prompts.RAG_ANSWER_PROMPT.format(
-        context_text=full_context, 
-        history_text=history_text, 
-        user_query=user_query
-    )
+    history_text += f"User: {user_query}"
+
+    # Select Prompt based on Mode
+    if search_params.get("mode") == "concept":
+        prompt = prompts.CONCEPT_ANSWER_PROMPT.format(
+            context_text=full_context, 
+            history_text=history_text, 
+            user_query=user_query
+        )
+    else:
+        # Default to Event/Safety prompt
+        prompt = prompts.RAG_ANSWER_PROMPT.format(
+            context_text=full_context, 
+            history_text=history_text, 
+            user_query=user_query
+        )
 
     try:
         response = model.generate_content(prompt)
