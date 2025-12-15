@@ -24,8 +24,11 @@ import datetime
 MONTH_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_month.geojson"
 HOUR_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_hour.geojson"
 
-collection_name = "myshake"
+# Collection Names
+COLLECTION_PDF = "myshake_pdf"
+COLLECTION_WEB = "myshake_web"
 processed_urls_collection = "processed_urls"
+
 client = MilvusClient("myshake.db")
 embedding_fn = model.DefaultEmbeddingFunction()  # sentence-transformers/all-MiniLM-L6-v2 - 256 token max
 max_tokens = 450
@@ -187,19 +190,58 @@ def mark_url_processed(url):
 
 def process_scrape_pdf(resp):
     reader = pypdf.PdfReader(io.BytesIO(resp.content))
-    chunks = pdfprocessor.chunk_pdf(reader, resp.url, embedding_fn.tokenizer, max_tokens)
-    if chunks: db_store(chunks)
+    # Pass metadata if available, but for scraped PDFs we might only have URL
+    # We can try to get title from PDF metadata
+    title = ""
+    author = ""
+    try:
+        if reader.metadata:
+            title = reader.metadata.get('/Title', "")
+            author = reader.metadata.get('/Author', "")
+    except:
+        pass
+        
+    if not title:
+        title = os.path.basename(resp.url)
+
+    chunks = pdfprocessor.chunk_pdf(reader, resp.url, embedding_fn.tokenizer, max_tokens, title=title, author=author)
+    if chunks: 
+        db_store(chunks, COLLECTION_PDF)
     print(f"Processed PDF; URL: {resp.url}.")
 
 def process_local_pdf(filepath):
     try:
-        reader = pypdf.PdfReader(filepath)
         # Create a file URI for the origin
         file_uri = f"file://{os.path.abspath(filepath)}"
-        chunks = pdfprocessor.chunk_pdf(reader, file_uri, embedding_fn.tokenizer, max_tokens)
+        
+        # Deduplication check
+        if is_url_processed(file_uri):
+            print(f"Skipping already processed local PDF: {filepath}")
+            return
+
+        reader = pypdf.PdfReader(filepath)
+        
+        title = ""
+        author = ""
+        try:
+            if reader.metadata:
+                title = reader.metadata.get('/Title', "")
+                author = reader.metadata.get('/Author', "")
+        except:
+            pass
+            
+        if not title:
+            title = os.path.basename(filepath)
+
+        chunks = pdfprocessor.chunk_pdf(reader, file_uri, embedding_fn.tokenizer, max_tokens, title=title, author=author)
         if chunks:
-            db_store(chunks)
-        print(f"Processed local PDF: {filepath}")
+            db_store(chunks, COLLECTION_PDF)
+            # Mark as processed only after successful store
+            mark_url_processed(file_uri)
+            print(f"Processed local PDF: {filepath}")
+        else:
+            print(f"No chunks extracted from {filepath}")
+            
     except Exception as e:
         print(f"Failed to process local PDF {filepath}: {e}")
 
@@ -217,8 +259,10 @@ def is_valid_scheme(url):
 def process_scrape_html(soup, url):
     
     chunks = chunk_soup(soup, url) # an array of dicts
-    if chunks: db_store(chunks)
+    if chunks: 
+        db_store(chunks, COLLECTION_WEB)
     print(f"Visited page; URL: {url}. Inserted: {bool(chunks)}")
+
 def chunk_soup(soup, url):
     """
     Improved chunking logic for RAG:
@@ -320,6 +364,9 @@ def chunk_soup(soup, url):
     
     # Now, find all content nodes after pruning
     node_list = soup.find_all(["h1","h2","h3","h4","h5","h6","p","ul","ol"])
+    
+    # Extract site name (simple approximation)
+    site_name = urlparse(url).netloc
 
     def flush_paragraph_buffer():
         nonlocal buffer, buffer_html
@@ -352,13 +399,11 @@ def chunk_soup(soup, url):
             flushed = flush_paragraph_buffer()
             for txt, html_snip in flushed:
                 all_chunks.append({
-                    "chktext": txt,
-                    "origin": url,
+                    "text": txt,
+                    "url": url,
                     "heading": current_heading,
-                    "html_snippet": html_snip,
-                    "date_utc": "",
-                    "magnitude": 0.0,
-                    "location": ""
+                    "site_name": site_name,
+                    "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
                 })
             # 2. Update heading for the next block
             current_heading = el.get_text(strip=True) or "Untitled Section"
@@ -375,13 +420,11 @@ def chunk_soup(soup, url):
             flushed = flush_paragraph_buffer()
             for txt, html_snip in flushed:
                 all_chunks.append({
-                    "chktext": txt,
-                    "origin": url,
+                    "text": txt,
+                    "url": url,
                     "heading": current_heading,
-                    "html_snippet": html_snip,
-                    "date_utc": "",
-                    "magnitude": 0.0,
-                    "location": ""
+                    "site_name": site_name,
+                    "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
                 })
 
             # 2. Process the list (which is now self-contained)
@@ -398,41 +441,41 @@ def chunk_soup(soup, url):
                 
                 for chunk_text in list_chunks:
                     all_chunks.append({
-                        "chktext": chunk_text,
-                        "origin": url,
+                        "text": chunk_text,
+                        "url": url,
                         "heading": current_heading,
-                        "html_snippet": html_snippet,
-                        "date_utc": "",
-                        "magnitude": 0.0,
-                        "location": ""
+                        "site_name": site_name,
+                        "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
                     })
 
     # 3. Final flush for any remaining buffered paragraphs
     flushed = flush_paragraph_buffer()
     for txt, html_snip in flushed:
         all_chunks.append({
-            "chktext": txt,
-            "origin": url,
+            "text": txt,
+            "url": url,
             "heading": current_heading,
-            "html_snippet": html_snip,
-            "date_utc": "",
-            "magnitude": 0.0,
-            "location": ""
+            "site_name": site_name,
+            "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
         })
 
     return all_chunks
 
 
-def db_store(chunks):
-    docs = [c["chktext"] for c in chunks]
+def db_store(chunks, collection_name):
+    if not chunks:
+        return
+        
+    # Extract text for embedding
+    docs = [c["text"] for c in chunks]
     
     vectors = embedding_fn.encode_documents(docs)
 
     for i in range(len(chunks)):
         chunks[i]["vector"] = vectors[i]
 
-    res = client.insert(collection_name="myshake",data=chunks)
-    print(res)
+    res = client.insert(collection_name=collection_name, data=chunks)
+    print(f"Inserted {len(chunks)} chunks into {collection_name}. Res: {res}")
 
 def fetch_earthquake_feed(url):
     print(f"Fetching earthquake feed: {url}")
@@ -455,13 +498,11 @@ def fetch_earthquake_feed(url):
                 origin = props['url']
                 
                 chunks.append({
-                    "chktext": text,
-                    "origin": origin,
+                    "text": text,
+                    "url": origin,
                     "heading": "Earthquake Report",
-                    "html_snippet": text, # Using text as snippet for now
-                    "date_utc": time_str,
-                    "magnitude": float(props['mag']) if props['mag'] is not None else 0.0,
-                    "location": props['place'] or "Unknown"
+                    "site_name": "USGS Earthquake Feed",
+                    "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
                 })
             except Exception as e:
                 print(f"Error processing feature: {e}")
@@ -475,55 +516,65 @@ def fetch_earthquake_feed(url):
 
 def init_collection():
     
-    # 1. Main Data Collection
-    if not client.has_collection(collection_name=collection_name):
+    # 1. PDF Collection
+    if not client.has_collection(collection_name=COLLECTION_PDF):
         fields = [
-            # Primary Key field - MUST be set with auto_id=True for automatic ID generation
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
-            
-            # Vector field (Dimension 768)
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=768),
-            
-            # Scalar fields to store chunk text and origin URL
-            # The Milvus Lite (SQLite) backend used with MilvusClient requires scalar fields to be defined.
-            FieldSchema(name="chktext", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="origin", dtype=DataType.VARCHAR, max_length=512),
-            FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
-            FieldSchema(name="html_snippet", dtype=DataType.VARCHAR, max_length=513),
-            # New fields for structured filtering
-            FieldSchema(name="date_utc", dtype=DataType.VARCHAR, max_length=32), # ISO 8601 format
-            FieldSchema(name="magnitude", dtype=DataType.FLOAT),
-            FieldSchema(name="location", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="page_num", dtype=DataType.INT64),
+            FieldSchema(name="author", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="doi", dtype=DataType.VARCHAR, max_length=256),
+            FieldSchema(name="publication_year", dtype=DataType.INT64),
         ]
 
-        schema = CollectionSchema(fields, description="Earthquake website scraped data")
+        schema = CollectionSchema(fields, description="PDF Documents")
         client.create_collection(
-            collection_name=collection_name,
+            collection_name=COLLECTION_PDF,
             schema=schema,
         )
 
         index_params = client.prepare_index_params()
-        
-        # Use AUTOINDEX index for the vector field (because i'm running the db locally, should change to HNSW later)
-        index_params.add_index(
-            field_name="vector", 
-            index_type="AUTOINDEX", # Not a High-Performance Index Type
-            metric_type="COSINE" # Metric for distance calculation
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+        client.create_index(collection_name=COLLECTION_PDF, index_params=index_params)
+        print(f"Collection '{COLLECTION_PDF}' created.")
+    else:
+        print(f"Collection '{COLLECTION_PDF}' already exists.")
+
+    # 2. Web Collection
+    if not client.has_collection(collection_name=COLLECTION_WEB):
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=768),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=2048),
+            FieldSchema(name="crawl_date", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(name="site_name", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
+        ]
+
+        schema = CollectionSchema(fields, description="Web Scraped Data")
+        client.create_collection(
+            collection_name=COLLECTION_WEB,
+            schema=schema,
         )
 
-        # Apply the index to the collection
-        client.create_index(collection_name=collection_name, index_params=index_params)
-        print(f"Collection '{collection_name}' created and 'vector' field indexed.")
-
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+        client.create_index(collection_name=COLLECTION_WEB, index_params=index_params)
+        print(f"Collection '{COLLECTION_WEB}' created.")
+        
         # Initial load of month feed
         print("Performing initial load of month feed...")
         chunks = fetch_earthquake_feed(MONTH_FEED)
         if chunks:
-            db_store(chunks)
-    else:
-        print(f"Collection '{collection_name}' already exists.")
+            db_store(chunks, COLLECTION_WEB)
 
-    # 2. Processed URLs Collection (for persistence/deduplication)
+    else:
+        print(f"Collection '{COLLECTION_WEB}' already exists.")
+
+    # 3. Processed URLs Collection (for persistence/deduplication)
     if not client.has_collection(collection_name=processed_urls_collection):
         url_fields = [
             FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=2048, is_primary=True),

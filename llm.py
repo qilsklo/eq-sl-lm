@@ -74,23 +74,64 @@ def get_search_params(user_query, api_key):
         print(f"Error extracting params: {e}")
         return {}
 
-def perform_vector_search(query, limit=3):
+def search_knowledge_base(query, limit=3):
     """
-    Performs standard vector search using standardscraper.
+    Performs vector search across both PDF and Web collections.
+    Returns a list of dictionaries containing full metadata.
     """
     try:
         query_vectors = standardscraper.embedding_fn.encode_queries([query])
-        res = standardscraper.client.search(
-            collection_name=standardscraper.collection_name,
+        
+        # Search PDF Collection
+        res_pdf = standardscraper.client.search(
+            collection_name=standardscraper.COLLECTION_PDF,
             data=query_vectors,
             limit=limit,
-            output_fields=["chktext"]
+            output_fields=["text", "title", "page_num", "author", "publication_year"]
         )
-        chunks = []
-        for hits in res:
+        
+        # Search Web Collection
+        res_web = standardscraper.client.search(
+            collection_name=standardscraper.COLLECTION_WEB,
+            data=query_vectors,
+            limit=limit,
+            output_fields=["text", "url", "site_name", "heading", "crawl_date"]
+        )
+        
+        results = []
+        
+        # Process PDF results
+        for hits in res_pdf:
             for hit in hits:
-                chunks.append(hit['entity']['chktext'])
-        return chunks
+                entity = hit['entity']
+                results.append({
+                    "type": "PDF",
+                    "content": entity.get('text', ''),
+                    "title": entity.get('title', 'Unknown Title'),
+                    "page_num": entity.get('page_num', '?'),
+                    "author": entity.get('author', ''),
+                    "year": entity.get('publication_year', ''),
+                    "score": hit['distance']
+                })
+
+        # Process Web results
+        for hits in res_web:
+            for hit in hits:
+                entity = hit['entity']
+                results.append({
+                    "type": "WEB",
+                    "content": entity.get('text', ''),
+                    "site_name": entity.get('site_name', 'Unknown Site'),
+                    "heading": entity.get('heading', ''),
+                    "url": entity.get('url', '#'),
+                    "crawl_date": entity.get('crawl_date', ''),
+                    "score": hit['distance']
+                })
+        
+        # Sort by score (descending) and take top results
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:limit]
+
     except Exception as e:
         print(f"Vector search failed: {e}")
         return []
@@ -100,14 +141,11 @@ def query_rag(user_query, history, api_key):
     model = genai.GenerativeModel('gemini-2.0-flash')
     
     # 1. Fetch latest data (simple polling simulation: fetch on query)
-    # In a real production app, this would be a background service.
     try:
-        # Fetching all_day to get better context
         new_events = earthquake_data.manager.fetch_feed("all_day")
         earthquake_data.manager.process_features(new_events)
     except Exception as e:
         print(f"Error updating feed: {e}")
-        # We continue, but the context will show 'stale' or 'unknown' if last fetch failed/didn't happen recently.
 
     # 2. Get Search Params
     search_params = get_search_params(user_query, api_key)
@@ -115,6 +153,7 @@ def query_rag(user_query, history, api_key):
     end_date = search_params.get("end_date")
     semantic_query = search_params.get("semantic_query")
     user_coordinates = search_params.get("user_coordinates")
+    mode = search_params.get("mode", "event") # Default to event
     
     # Default to UC Berkeley if no location specified
     if not user_coordinates:
@@ -124,14 +163,8 @@ def query_rag(user_query, history, api_key):
         semantic_query = user_query
 
     # 3. Get Context from EarthquakeManager
-    # Extract magnitude constraint
-    # First try from LLM params
     min_mag = search_params.get("min_magnitude")
-    
-    # Fallback to regex if not found in params (and ensure regex is robust)
     if min_mag is None:
-        # Regex: Look for 'magnitude', 'mag', 'm' followed by number, OR just 'M' followed by number
-        # Use word boundaries to avoid matching 'from' -> 'm'
         mag_match = re.search(r'\b(?:magnitude|mag|m)\s*(\d+(?:\.\d+)?)', user_query, re.IGNORECASE)
         if mag_match:
             try:
@@ -139,8 +172,6 @@ def query_rag(user_query, history, api_key):
             except ValueError:
                 pass
     
-    # Check if user is asking about a specific event (naive check, or use search params)
-    # For now, we just give the latest context.
     context_data = earthquake_data.manager.get_context_for_llm(
         min_magnitude=min_mag,
         start_date=start_date,
@@ -151,8 +182,23 @@ def query_rag(user_query, history, api_key):
     event_context_json = json.dumps(context_data, indent=2)
     
     # 4. Get Safety Docs via Vector Search
-    safety_docs = perform_vector_search(semantic_query, limit=3)
-    safety_context_text = "\n\n".join([f"[DOC {i+1}] {doc}" for i, doc in enumerate(safety_docs)])
+    # Increase limit to get a mix of PDF and Web results
+    raw_docs = search_knowledge_base(semantic_query, limit=5)
+    
+    # Format Context based on Mode
+    if mode == "concept":
+        # Structured format for citation generation
+        safety_context_text = json.dumps(raw_docs, indent=2)
+    else:
+        # Simple string format for other modes (backward compatibility)
+        formatted_docs = []
+        for i, doc in enumerate(raw_docs):
+            if doc['type'] == 'PDF':
+                citation = f"(PDF: {doc['title']}, p.{doc['page_num']})"
+            else:
+                citation = f"(WEB: {doc['site_name']} - {doc['heading']}) [Link]({doc['url']})"
+            formatted_docs.append(f"[DOC {i+1}] {citation}\n{doc['content']}")
+        safety_context_text = "\n\n".join(formatted_docs)
 
     # Combine Contexts
     full_context = f"""
@@ -164,16 +210,13 @@ def query_rag(user_query, history, api_key):
 """
     
     # 5. Generate Answer
-    # Format history
     history_text = ""
     for role, msg in history:
         history_text += f"{role}: {msg}\n"
     history_text += f"User: {user_query}"
 
-    history_text += f"User: {user_query}"
-
     # Select Prompt based on Mode
-    if search_params.get("mode") == "concept":
+    if mode == "concept":
         prompt = prompts.CONCEPT_ANSWER_PROMPT.format(
             context_text=full_context, 
             history_text=history_text, 
