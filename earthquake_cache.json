@@ -1023,7 +1023,7 @@
     "75279971": {
       "event_id": "75279971",
       "origin_time_utc": "2025-12-14T23:30:43.210000+00:00",
-      "last_updated_utc": "2025-12-15T16:24:38.132000+00:00",
+      "last_updated_utc": "2025-12-15T17:01:20.009000+00:00",
       "magnitude": 4.03,
       "magnitude_type": "mw",
       "depth_km": 3.13,
@@ -1033,7 +1033,7 @@
       "review_status": "reviewed",
       "tsunami_flag": true,
       "source": "USGS",
-      "version": 4
+      "version": 5
     },
     "41351888": {
       "event_id": "41351888",
@@ -3333,7 +3333,7 @@
     "75280156": {
       "event_id": "75280156",
       "origin_time_utc": "2025-12-15T06:47:16.070000+00:00",
-      "last_updated_utc": "2025-12-15T16:11:15.423000+00:00",
+      "last_updated_utc": "2025-12-15T16:48:24.852000+00:00",
       "magnitude": 2.66,
       "magnitude_type": "md",
       "depth_km": 7.80999994277954,
@@ -3343,7 +3343,7 @@
       "review_status": "automatic",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 5
+      "version": 6
     },
     "75280151": {
       "event_id": "75280151",
@@ -3467,18 +3467,18 @@
     },
     "62209782": {
       "event_id": "62209782",
-      "origin_time_utc": "2025-12-15T16:29:38.490000+00:00",
-      "last_updated_utc": "2025-12-15T16:43:34.873000+00:00",
-      "magnitude": 2.87,
+      "origin_time_utc": "2025-12-15T16:29:38.710000+00:00",
+      "last_updated_utc": "2025-12-15T17:05:48.886000+00:00",
+      "magnitude": 2.94,
       "magnitude_type": "ml",
-      "depth_km": 0.64,
-      "latitude": 48.521166666666666,
-      "longitude": -121.79616666666666,
+      "depth_km": 5.67,
+      "latitude": 48.52733333333333,
+      "longitude": -121.79833333333333,
       "place_description": "4 km WSW of Concrete, Washington",
       "review_status": "reviewed",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 2
+      "version": 3
     },
     "2025yqaxut": {
       "event_id": "2025yqaxut",
@@ -3603,7 +3603,7 @@
     "62209737": {
       "event_id": "62209737",
       "origin_time_utc": "2025-12-15T15:06:20.990000+00:00",
-      "last_updated_utc": "2025-12-15T16:40:50.401000+00:00",
+      "last_updated_utc": "2025-12-15T17:06:49.494000+00:00",
       "magnitude": 2.6,
       "magnitude_type": "ml",
       "depth_km": 5.48,
@@ -3613,7 +3613,7 @@
       "review_status": "reviewed",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 1
+      "version": 2
     },
     "41352192": {
       "event_id": "41352192",
@@ -4649,7 +4649,97 @@
       "tsunami_flag": false,
       "source": "USGS",
       "version": 1
+    },
+    "2025yqcrue": {
+      "event_id": "2025yqcrue",
+      "origin_time_utc": "2025-12-15T17:05:15.564000+00:00",
+      "last_updated_utc": "2025-12-15T17:07:27.550000+00:00",
+      "magnitude": 2.4,
+      "magnitude_type": "ml",
+      "depth_km": 14.1,
+      "latitude": 60.387,
+      "longitude": -147.781,
+      "place_description": "37 km NNE of Chenega, Alaska",
+      "review_status": "automatic",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "74854642": {
+      "event_id": "74854642",
+      "origin_time_utc": "2025-12-15T16:59:05.220000+00:00",
+      "last_updated_utc": "2025-12-15T17:02:37.590000+00:00",
+      "magnitude": 2.05,
+      "magnitude_type": "ml",
+      "depth_km": 30.9699993133545,
+      "latitude": 19.2546672821045,
+      "longitude": -155.365005493164,
+      "place_description": "13 km ENE of P\u0101hala, Hawaii",
+      "review_status": "automatic",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "2025yqcfhk": {
+      "event_id": "2025yqcfhk",
+      "origin_time_utc": "2025-12-15T16:50:46.385000+00:00",
+      "last_updated_utc": "2025-12-15T16:52:34.478000+00:00",
+      "magnitude": 1.9,
+      "magnitude_type": "ml",
+      "depth_km": 18.4,
+      "latitude": 61.922,
+      "longitude": -149.629,
+      "place_description": "28 km NW of Fishhook, Alaska",
+      "review_status": "automatic",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "62209742": {
+      "event_id": "62209742",
+      "origin_time_utc": "2025-12-15T15:44:33.090000+00:00",
+      "last_updated_utc": "2025-12-15T17:06:51.460000+00:00",
+      "magnitude": 1.48,
+      "magnitude_type": "ml",
+      "depth_km": 5.15,
+      "latitude": 48.52733333333333,
+      "longitude": -121.80666666666667,
+      "place_description": "4 km WSW of Concrete, Washington",
+      "review_status": "reviewed",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "62209712": {
+      "event_id": "62209712",
+      "origin_time_utc": "2025-12-15T07:12:21.360000+00:00",
+      "last_updated_utc": "2025-12-15T16:50:17.290000+00:00",
+      "magnitude": 1.24,
+      "magnitude_type": "ml",
+      "depth_km": 13.11,
+      "latitude": 48.024166666666666,
+      "longitude": -122.884,
+      "place_description": "7 km W of Port Hadlock-Irondale, Washington",
+      "review_status": "reviewed",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "2025ypiqbt": {
+      "event_id": "2025ypiqbt",
+      "origin_time_utc": "2025-12-15T06:59:51.027000+00:00",
+      "last_updated_utc": "2025-12-15T16:58:17.747000+00:00",
+      "magnitude": 1.4,
+      "magnitude_type": "ml",
+      "depth_km": 6.3965,
+      "latitude": 32.324,
+      "longitude": -101.059,
+      "place_description": "5 km SW of Westbrook, Texas",
+      "review_status": "reviewed",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
     }
   },
-  "last_saved": "2025-12-15T16:45:25.443822+00:00"
+  "last_saved": "2025-12-15T17:09:16.208332+00:00"
 }
