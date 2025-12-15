@@ -134,5 +134,5 @@ def chunk_pdf(reader, url, tokenizer, max_tokens):
         final_chunks.append(current_chunk_text.strip())
     
     # Create chunks with metadata
-    f = [{"chktext":c, "origin":url, "heading":"PDF Content","html_snippet":c[:500]} for c in final_chunks]
+    f = [{"chktext":c, "origin":url, "heading":"PDF Content","html_snippet":c[:500], "date_utc": "", "magnitude": 0.0, "location": ""} for c in final_chunks]
     return f

@@ -1,32 +1,30 @@
+import time
+import datetime
+import earthquake_data
 
-import standardscraper
-
-def update_hourly():
-    print("Running hourly update...")
-    chunks = standardscraper.fetch_earthquake_feed(standardscraper.HOUR_FEED)
-    if not chunks:
-        print("No data found in hourly feed.")
-        return
-
-    # Deduplicate
-    unique_chunks = []
-    for chunk in chunks:
-        # Check if origin already exists
-        res = standardscraper.client.query(
-            collection_name=standardscraper.collection_name,
-            filter=f'origin == "{chunk["origin"]}"',
-            output_fields=["id"]
-        )
-        if not res:
-            unique_chunks.append(chunk)
-        else:
-            print(f"Duplicate found, skipping: {chunk['origin']}")
+def run_updater(interval_seconds=300):
+    """
+    Continuously fetches the 'all_hour' feed to keep the cache fresh.
+    """
+    print(f"Starting Earthquake Updater Service (Interval: {interval_seconds}s)")
+    
+    while True:
+        try:
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{now}] Fetching 'all_hour' feed...")
             
-    if unique_chunks:
-        print(f"Storing {len(unique_chunks)} new earthquake records.")
-        standardscraper.db_store(unique_chunks)
-    else:
-        print("No new unique earthquake records to store.")
+            # Fetch and process data
+            # This automatically updates the cache file via the manager
+            features = earthquake_data.manager.fetch_feed("all_hour")
+            earthquake_data.manager.process_features(features)
+            
+            print(f"[{now}] Update complete. Cache contains {len(earthquake_data.manager.cache)} events.")
+            
+        except Exception as e:
+            print(f"Error during update: {e}")
+        
+        time.sleep(interval_seconds)
 
 if __name__ == "__main__":
-    update_hourly()
+    # Run every 5 minutes by default
+    run_updater()

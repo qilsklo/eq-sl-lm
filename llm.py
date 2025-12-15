@@ -49,142 +49,89 @@ def get_api_key():
         exit(1)
     return key
 
-def get_recent_earthquakes(limit=10):
-    """
-    Fetches recent earthquake reports from the database.
-    """
-    res = standardscraper.client.query(
-        collection_name=standardscraper.collection_name,
-        filter='heading == "Earthquake Report"',
-        output_fields=["chktext", "origin"],
-        limit=100 
-    )
-    
-    if not res:
-        return []
+import earthquake_data
 
-    def parse_date(text):
-        match = re.search(r'on (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)', text)
-        if match:
-            return datetime.datetime.strptime(match.group(1), '%Y-%m-%d %H:%M:%S %Z')
-        return datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+import earthquake_data
 
-    sorted_res = sorted(res, key=lambda x: parse_date(x['chktext']), reverse=True)
-    return sorted_res[:limit]
-
-def perform_vector_search(query, limit=5):
+def perform_vector_search(query, limit=3):
     """
-    Performs standard vector search.
+    Performs standard vector search using standardscraper.
     """
-    query_vectors = standardscraper.embedding_fn.encode_queries([query])
-    res = standardscraper.client.search(
-        collection_name=standardscraper.collection_name,
-        data=query_vectors,
-        limit=limit,
-        output_fields=["chktext"]
-    )
-    chunks = []
-    for hits in res:
-        for hit in hits:
-            chunks.append(hit['entity']['chktext'])
-    return chunks
-
-def perform_filtered_search(query, filter_expr, limit=5):
-    """
-    Performs vector search with a filter.
-    """
-    query_vectors = standardscraper.embedding_fn.encode_queries([query])
-    res = standardscraper.client.search(
-        collection_name=standardscraper.collection_name,
-        data=query_vectors,
-        limit=limit,
-        filter=filter_expr,
-        output_fields=["chktext"]
-    )
-    chunks = []
-    for hits in res:
-        for hit in hits:
-            chunks.append(hit['entity']['chktext'])
-    return chunks
-
-def generate_search_params(user_query, api_key):
-    """
-    Uses LLM to parse the query into semantic query and structured filter.
-    """
-    genai.configure(api_key=api_key)
-    # Using a faster model for this utility task
-    model = genai.GenerativeModel('gemini-2.0-flash') 
-    
-    current_datetime = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    
-    prompt = prompts.SEARCH_PARAM_PROMPT.format(current_datetime=current_datetime, user_query=user_query)
-    
     try:
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-        return json.loads(response.text)
+        query_vectors = standardscraper.embedding_fn.encode_queries([query])
+        res = standardscraper.client.search(
+            collection_name=standardscraper.collection_name,
+            data=query_vectors,
+            limit=limit,
+            output_fields=["chktext"]
+        )
+        chunks = []
+        for hits in res:
+            for hit in hits:
+                chunks.append(hit['entity']['chktext'])
+        return chunks
     except Exception as e:
-        print(f"Error generating search params: {e}")
-        return {"semantic_query": user_query, "filter_expression": ""}
+        print(f"Vector search failed: {e}")
+        return []
 
 def query_rag(user_query, history, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.0-flash')
     
-    # 1. Plan the Search
-    plan = generate_search_params(user_query, api_key)
-    semantic_query = plan.get("semantic_query", user_query)
-    filter_expr = plan.get("filter_expression", "")
-    
-    # print(f"[DEBUG] Plan: {plan}")
+    # 1. Fetch latest data (simple polling simulation: fetch on query)
+    # In a real production app, this would be a background service.
+    try:
+        # Fetching all_day to get better context
+        new_events = earthquake_data.manager.fetch_feed("all_day")
+        earthquake_data.manager.process_features(new_events)
+    except Exception as e:
+        print(f"Error updating feed: {e}")
+        # We continue, but the context will show 'stale' or 'unknown' if last fetch failed/didn't happen recently.
 
+    # 2. Get Context from EarthquakeManager
+    # We could still use the vector search for general knowledge if needed, 
+    # but the spec emphasizes USGS data. 
+    # For this implementation, we'll focus on the structured data context.
+    
+    # Extract magnitude constraint
+    min_mag = None
+    mag_match = re.search(r'(?:magnitude|mag|m)\s*(\d+(?:\.\d+)?)', user_query, re.IGNORECASE)
+    if mag_match:
+        try:
+            min_mag = float(mag_match.group(1))
+        except ValueError:
+            pass
+
+    # Check if user is asking about a specific event (naive check, or use search params)
+    # For now, we just give the latest context.
+    context_data = earthquake_data.manager.get_context_for_llm(min_magnitude=min_mag)
+    event_context_json = json.dumps(context_data, indent=2)
+    
+    # 3. Get Safety Docs via Vector Search
+    safety_docs = perform_vector_search(user_query, limit=3)
+    safety_context_text = "\n\n".join([f"[DOC {i+1}] {doc}" for i, doc in enumerate(safety_docs)])
+
+    # Combine Contexts
+    full_context = f"""
+--- EVENT DATA (Authoritative) ---
+{event_context_json}
+
+--- SAFETY DOCS (Reference) ---
+{safety_context_text}
+"""
+    
+    # 4. Generate Answer
     # Format history
     history_text = ""
     for role, msg in history:
         history_text += f"{role}: {msg}\n"
     history_text += f"User: {user_query}"
-    
-    # Always retrieve both types of context
-    context_chunks = []
-    
-    # 2. Vector Search
-    # If we have a filter, use it. Otherwise, standard search.
-    if filter_expr:
-        # print(f"[DEBUG] Performing Filtered Search: {filter_expr}")
-        try:
-            filtered_chunks = perform_filtered_search(semantic_query, filter_expr, limit=10)
-            for chunk in filtered_chunks:
-                context_chunks.append(f"[FILTERED RESULT] {chunk}")
-        except Exception as e:
-            print(f"[ERROR] Filtered search failed: {e}. Falling back to standard search.")
-            search_chunks = perform_vector_search(semantic_query, limit=5)
-            for chunk in search_chunks:
-                context_chunks.append(f"[SEARCH RESULT] {chunk}")
-    else:
-        # Standard search (General + Earthquake Reports)
-        search_chunks = perform_vector_search(semantic_query, limit=5)
-        for chunk in search_chunks:
-            context_chunks.append(f"[SEARCH RESULT] {chunk}")
-            
-        # Also try to get reports specifically if no filter was applied, just in case
-        report_chunks = perform_filtered_search(semantic_query, filter_expr='heading == "Earthquake Report"', limit=5)
-        for chunk in report_chunks:
-             formatted_chunk = f"[SEARCH RESULT] {chunk}"
-             if formatted_chunk not in context_chunks:
-                context_chunks.append(formatted_chunk)
 
-    # 3. Latest Earthquakes (Always good context)
-    recent_eqs = get_recent_earthquakes(limit=10)
-    for eq in recent_eqs:
-        context_chunks.append(f"[LATEST REPORT] {eq['chktext']}")
-        
-    context_text = "\n\n".join(context_chunks)
-    # print(f"[DEBUG] Context Text:\n{context_text}\n[DEBUG] End Context")
-    
-    # 4. Generate Answer
-    # 3. Generate Answer
-    current_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    prompt = prompts.RAG_ANSWER_PROMPT.format(current_datetime=current_datetime, history_text=history_text, context_text=context_text, user_query=user_query)
+    prompt = prompts.RAG_ANSWER_PROMPT.format(
+        context_text=full_context, 
+        history_text=history_text, 
+        user_query=user_query
+    )
 
     try:
         response = model.generate_content(prompt)

@@ -1,4 +1,8 @@
 import requests
+import logging
+
+# Suppress pypdf warnings
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 from bs4 import BeautifulSoup, Tag
 import asyncio
 import aiohttp
@@ -540,14 +544,20 @@ if __name__ == '__main__':
     init_collection()
     
     # #Process local PDFs first
-    # pdf_files = glob.glob("docs/*.pdf")
-    # print(f"Found {len(pdf_files)} local PDF files in docs/")
-    # for pdf_file in pdf_files:
-    #     process_local_pdf(pdf_file)
+    pdf_files = glob.glob("docs/*.pdf")
+    print(f"Found {len(pdf_files)} local PDF files in docs/")
+    for pdf_file in pdf_files:
+        process_local_pdf(pdf_file)
 
     u =["https://www.earthquakecountry.org/",
         "https://www.usgs.gov/programs/earthquake-hazards/faqs-category",
         "https://myshake.berkeley.edu",
-        "https://seismo.berkeley.edu"]
+        "https://seismo.berkeley.edu",
+        "https://www.ready.gov/earthquakes",
+        "https://www.redcross.org/get-help/how-to-prepare-for-emergencies/types-of-emergencies/earthquake.html",
+        "https://www.caloes.ca.gov/",
+        "https://www.gdacs.org/",
+        "https://www.ifrc.org/earthquake",
+        ]
     
     scrape(u)
