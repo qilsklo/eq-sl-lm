@@ -198,7 +198,7 @@ class EarthquakeManager:
     def get_event(self, event_id) -> Optional[EarthquakeEvent]:
         return self.cache.get(event_id)
 
-    def get_context_for_llm(self, event_id=None, user_lat=None, user_lon=None, min_magnitude=None, limit=10):
+    def get_context_for_llm(self, event_id=None, user_lat=None, user_lon=None, min_magnitude=None, date_filter=None, limit=3):
         """
         Constructs the structured JSON context for the LLM.
         If event_id is provided, focuses on that event.
