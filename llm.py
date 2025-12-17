@@ -9,6 +9,7 @@ import streamlit as st
 import standardscraper
 
 import prompts
+from pymilvus import AnnSearchRequest, RRFRanker
 
 # Load environment variables
 load_dotenv()
@@ -74,66 +75,101 @@ def get_search_params(user_query, api_key):
         print(f"Error extracting params: {e}")
         return {}
 
-def search_knowledge_base(query, limit=3):
+
+def search_knowledge_base(query, limit=15):
     """
-    Performs vector search across both PDF and Web collections.
-    Returns a list of dictionaries containing full metadata.
+    Performs hybrid search (BM25 + Vector) across both PDF and Web collections.
     """
     try:
-        query_vectors = standardscraper.embedding_fn.encode_queries([query])
+        # 1. Prepare Requests
+        query_dense = standardscraper.embedding_fn.encode_queries([query])[0]
         
-        # Search PDF Collection
-        res_pdf = standardscraper.client.search(
-            collection_name=standardscraper.COLLECTION_PDF,
-            data=query_vectors,
-            limit=limit,
-            output_fields=["text", "title", "page_num", "author", "publication_year"]
+        # Dense Request (Vector)
+        req_dense = AnnSearchRequest(
+            data=[query_dense],
+            anns_field="vector",
+            param={"metric_type": "COSINE", "params": {}},
+            limit=limit * 2 # Get more candidates
         )
         
-        # Search Web Collection
-        res_web = standardscraper.client.search(
-            collection_name=standardscraper.COLLECTION_WEB,
-            data=query_vectors,
-            limit=limit,
-            output_fields=["text", "url", "site_name", "heading", "crawl_date"]
+        # Sparse Request (BM25)
+        req_sparse = AnnSearchRequest(
+            data=[query], # Text for BM25 function
+            anns_field="sparse",
+            param={"metric_type": "BM25", "params": {}},
+            limit=limit * 2
         )
+        
+        reqs = [req_dense, req_sparse]
+        ranker = RRFRanker(k=60)
         
         results = []
         
-        # Process PDF results
-        for hits in res_pdf:
-            for hit in hits:
-                entity = hit['entity']
-                results.append({
-                    "type": "PDF",
-                    "content": entity.get('text', ''),
-                    "title": entity.get('title', 'Unknown Title'),
-                    "page_num": entity.get('page_num', '?'),
-                    "author": entity.get('author', ''),
-                    "year": entity.get('publication_year', ''),
-                    "score": hit['distance']
-                })
+        # 2. Search PDF Collection
+        try:
+            # Check if collection is empty to avoid Milvus crash on sparse search
+            stats = standardscraper.client.get_collection_stats(standardscraper.COLLECTION_PDF)
+            if stats['row_count'] > 0:
+                res_pdf = standardscraper.client.hybrid_search(
+                    collection_name=standardscraper.COLLECTION_PDF,
+                    reqs=reqs,
+                    ranker=ranker,
+                    limit=limit,
+                    output_fields=["text", "title", "page_num", "author", "publication_year"]
+                )
+                
+                if res_pdf and len(res_pdf) > 0:
+                    for hit in res_pdf[0]:
+                        entity = hit['entity']
+                        results.append({
+                            "type": "PDF",
+                            "content": entity.get('text', ''),
+                            "title": entity.get('title', 'Unknown Title'),
+                            "page_num": entity.get('page_num', '?'),
+                            "author": entity.get('author', ''),
+                            "year": entity.get('publication_year', ''),
+                            "score": hit['distance']
+                        })
+            
+        except Exception as e:
+            print(f"PDF Hybrid Search failed: {e}")
 
-        # Process Web results
-        for hits in res_web:
-            for hit in hits:
-                entity = hit['entity']
-                results.append({
-                    "type": "WEB",
-                    "content": entity.get('text', ''),
-                    "site_name": entity.get('site_name', 'Unknown Site'),
-                    "heading": entity.get('heading', ''),
-                    "url": entity.get('url', '#'),
-                    "crawl_date": entity.get('crawl_date', ''),
-                    "score": hit['distance']
-                })
-        
-        # Sort by score (descending) and take top results
+        # 3. Search Web Collection
+        try:
+            # Check if collection is empty
+            stats = standardscraper.client.get_collection_stats(standardscraper.COLLECTION_WEB)
+            if stats['row_count'] > 0:
+                res_web = standardscraper.client.hybrid_search(
+                    collection_name=standardscraper.COLLECTION_WEB,
+                    reqs=reqs,
+                    ranker=ranker,
+                    limit=limit,
+                    output_fields=["text", "url", "site_name", "heading", "crawl_date"]
+                )
+                
+                if res_web and len(res_web) > 0:
+                    for hit in res_web[0]:
+                        entity = hit['entity']
+                        results.append({
+                            "type": "WEB",
+                            "content": entity.get('text', ''),
+                            "site_name": entity.get('site_name', 'Unknown Site'),
+                            "heading": entity.get('heading', ''),
+                            "url": entity.get('url', '#'),
+                            "crawl_date": entity.get('crawl_date', ''),
+                            "score": hit['distance']
+                        })
+        except Exception as e:
+            print(f"Web Hybrid Search failed: {e}")
+            
+        # 4. Sort Combined Results
+        # Since scores are RRF scores (0-1), we can compare them directly?
+        # RRF scores are comparable across collections if k is same.
         results.sort(key=lambda x: x['score'], reverse=True)
-        return results
+        return results[:limit]
 
     except Exception as e:
-        print(f"Vector search failed: {e}")
+        print(f"Hybrid search failed: {e}")
         return []
 
 def query_rag(user_query, history, api_key):
@@ -232,7 +268,7 @@ def query_rag(user_query, history, api_key):
 
     try:
         response = model.generate_content(prompt)
-        return response.text
+        return mode + "\n\n" + response.text
     except Exception as e:
         return f"Error calling LLM: {e}"
 

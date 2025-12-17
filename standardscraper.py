@@ -8,7 +8,7 @@ import asyncio
 import aiohttp
 import re
 from urllib.parse import urlparse
-from pymilvus import MilvusClient, FieldSchema, CollectionSchema, DataType, model
+from pymilvus import MilvusClient, FieldSchema, CollectionSchema, DataType, model, Function, FunctionType
 import tiktoken
 from bs4 import NavigableString
 import io
@@ -647,10 +647,19 @@ def init_collection():
     
     # 1. PDF Collection
     if not client.has_collection(collection_name=COLLECTION_PDF):
+        # Define BM25 Function
+        bm25_function = Function(
+            name="text_bm25_emb",
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+            function_type=FunctionType.BM25,
+        )
+
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=768),
-            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR), # BM25 Output
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535, enable_analyzer=True), # Enable analyzer for BM25
             FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=512),
             FieldSchema(name="page_num", dtype=DataType.INT64),
             FieldSchema(name="author", dtype=DataType.VARCHAR, max_length=512),
@@ -658,7 +667,7 @@ def init_collection():
             FieldSchema(name="publication_year", dtype=DataType.INT64),
         ]
 
-        schema = CollectionSchema(fields, description="PDF Documents")
+        schema = CollectionSchema(fields, description="PDF Documents", functions=[bm25_function])
         client.create_collection(
             collection_name=COLLECTION_PDF,
             schema=schema,
@@ -666,6 +675,7 @@ def init_collection():
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
         client.create_index(collection_name=COLLECTION_PDF, index_params=index_params)
         print(f"Collection '{COLLECTION_PDF}' created.")
     else:
@@ -673,17 +683,26 @@ def init_collection():
 
     # 2. Web Collection
     if not client.has_collection(collection_name=COLLECTION_WEB):
+        # Define BM25 Function
+        bm25_function = Function(
+            name="text_bm25_emb",
+            input_field_names=["text"],
+            output_field_names=["sparse"],
+            function_type=FunctionType.BM25,
+        )
+
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=768),
-            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="sparse", dtype=DataType.SPARSE_FLOAT_VECTOR), # BM25 Output
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535, enable_analyzer=True),
             FieldSchema(name="url", dtype=DataType.VARCHAR, max_length=2048),
             FieldSchema(name="crawl_date", dtype=DataType.VARCHAR, max_length=64),
             FieldSchema(name="site_name", dtype=DataType.VARCHAR, max_length=512),
             FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
         ]
 
-        schema = CollectionSchema(fields, description="Web Scraped Data")
+        schema = CollectionSchema(fields, description="Web Scraped Data", functions=[bm25_function])
         client.create_collection(
             collection_name=COLLECTION_WEB,
             schema=schema,
@@ -691,14 +710,15 @@ def init_collection():
 
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
         client.create_index(collection_name=COLLECTION_WEB, index_params=index_params)
         print(f"Collection '{COLLECTION_WEB}' created.")
         
         # Initial load of month feed
-        print("Performing initial load of month feed...")
-        chunks = fetch_earthquake_feed(MONTH_FEED)
-        if chunks:
-            db_store(chunks, COLLECTION_WEB)
+        # print("Performing initial load of month feed...")
+        # chunks = fetch_earthquake_feed(MONTH_FEED)
+        # if chunks:
+        #     db_store(chunks, COLLECTION_WEB)
 
     else:
         print(f"Collection '{COLLECTION_WEB}' already exists.")
@@ -738,6 +758,8 @@ if __name__ == '__main__':
         "https://www.caloes.ca.gov/",
         "https://www.gdacs.org/",
         "https://www.ifrc.org/earthquake",
+        "https://seismo.berkeley.edu/eqInfo/1868_quake.html",
+        "https://seismo.berkeley.edu/eqInfo/1906_quake.html"
         ]
     
     scrape(u)
