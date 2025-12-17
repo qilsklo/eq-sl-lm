@@ -758,8 +758,6 @@ if __name__ == '__main__':
         "https://www.caloes.ca.gov/",
         "https://www.gdacs.org/",
         "https://www.ifrc.org/earthquake",
-        "https://seismo.berkeley.edu/eqInfo/1868_quake.html",
-        "https://seismo.berkeley.edu/eqInfo/1906_quake.html"
         ]
     
     scrape(u)
