@@ -83,6 +83,9 @@ def scrape(start_urls):
             process_scrape_pdf(response)
             mark_url_processed(url)
             continue
+        if ".jpg" in url or ".png" in url or ".gif" in url or ".jpeg" in url:
+            mark_url_processed(url)
+            continue
             
         soup = BeautifulSoup(response.text, 'html.parser')
         process_scrape_html(soup, url)

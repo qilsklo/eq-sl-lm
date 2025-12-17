@@ -2673,7 +2673,7 @@
     "2025yoszov": {
       "event_id": "2025yoszov",
       "origin_time_utc": "2025-12-14T23:08:17.355000+00:00",
-      "last_updated_utc": "2025-12-15T11:53:07.616000+00:00",
+      "last_updated_utc": "2025-12-15T22:18:14.418000+00:00",
       "magnitude": 3.2,
       "magnitude_type": "ml",
       "depth_km": 5,
@@ -2683,7 +2683,7 @@
       "review_status": "reviewed",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 1
+      "version": 2
     },
     "75279956": {
       "event_id": "75279956",
@@ -3992,18 +3992,18 @@
     },
     "41352520": {
       "event_id": "41352520",
-      "origin_time_utc": "2025-12-15T22:09:59.030000+00:00",
-      "last_updated_utc": "2025-12-15T22:12:02.055000+00:00",
-      "magnitude": 1.31131038265507,
+      "origin_time_utc": "2025-12-15T22:09:59.140000+00:00",
+      "last_updated_utc": "2025-12-15T22:15:22.431000+00:00",
+      "magnitude": 1.3,
       "magnitude_type": "ml",
-      "depth_km": -0.680000007152557,
-      "latitude": 34.5076675415039,
-      "longitude": -119.02766418457,
-      "place_description": "16 km NW of Fillmore, CA",
+      "depth_km": 7.15,
+      "latitude": 34.4911666666667,
+      "longitude": -119.031166666667,
+      "place_description": "15 km NW of Fillmore, CA",
       "review_status": "automatic",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 1
+      "version": 2
     },
     "41352528": {
       "event_id": "41352528",
@@ -4019,7 +4019,52 @@
       "tsunami_flag": false,
       "source": "USGS",
       "version": 1
+    },
+    "41352536": {
+      "event_id": "41352536",
+      "origin_time_utc": "2025-12-15T22:11:30.180000+00:00",
+      "last_updated_utc": "2025-12-15T22:15:06.429000+00:00",
+      "magnitude": 1.22,
+      "magnitude_type": "ml",
+      "depth_km": 4.63,
+      "latitude": 34.4913333333333,
+      "longitude": -119.021166666667,
+      "place_description": "14 km NW of Fillmore, CA",
+      "review_status": "automatic",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "93947821": {
+      "event_id": "93947821",
+      "origin_time_utc": "2025-12-15T05:31:33.130000+00:00",
+      "last_updated_utc": "2025-12-15T22:15:16.950000+00:00",
+      "magnitude": 0.19,
+      "magnitude_type": "ml",
+      "depth_km": 1.79,
+      "latitude": 52.0628333333333,
+      "longitude": -176.143333333333,
+      "place_description": "39 km ENE of Adak, Alaska",
+      "review_status": "reviewed",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "93053289": {
+      "event_id": "93053289",
+      "origin_time_utc": "2025-12-15T04:35:38.430000+00:00",
+      "last_updated_utc": "2025-12-15T22:16:47.150000+00:00",
+      "magnitude": 0.6,
+      "magnitude_type": "ml",
+      "depth_km": 4.18,
+      "latitude": 52.0645,
+      "longitude": -176.168666666667,
+      "place_description": "38 km ENE of Adak, Alaska",
+      "review_status": "reviewed",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
     }
   },
-  "last_saved": "2025-12-15T22:14:33.165152+00:00"
+  "last_saved": "2025-12-15T22:18:47.731579+00:00"
 }
