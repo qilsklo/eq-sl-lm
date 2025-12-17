@@ -10,10 +10,10 @@ SEARCH_PARAM_PROMPT = """You are an expert RAG query planner. Your task is to an
     3. If no date is specified, `start_date` and `end_date` should be null.
     4. If a minimum magnitude is specified (e.g., "5.0+", "over 4", "M3"), extract it as `min_magnitude` (float). Otherwise null.
     5. If the user mentions their location (e.g., "I'm in Berkeley", "near San Francisco"), extract `user_location` (string) and estimate `user_coordinates` [lat, lon] using your internal knowledge. If no location is mentioned, these should be null.
-    6. `semantic_query` is the text part of the query, stripped of date/mag/location references if possible.
+    6. `semantic_query` is the text part of the query, stripped of date/mag/location references if possible. If the query contains typos, colloquialisms, initialisms, or acronyms, expand them to their full, academic form. For instance, the "SF EQ" refers to the "San Francisco earthquake".
     7. **Mode Classification**: Classify the query into exactly one of the following modes:
        - "event": User is asking about a specific earthquake or recent seismic activity (e.g., "What just happened?", "Any quakes today?"). Short queries default to this.
-       - "concept": User is asking for an explanation of a scientific concept or topic (e.g., "How do aftershocks work?", "What is tomography?"). Queries with "what is", "how does" default to this.
+       - "concept": User is asking for an explanation of a scientific concept or topic (e.g., "How do aftershocks work?", "What is tomography?"). Queries with "what is", "how does" default to this. The topic may be an older earthquake. For instance, a question about the "1868 San Francisco earthquake" should be classified as "concept".
        - "safety": User is asking what to do, how to respond, or about safety/danger (e.g., "What should I do?", "Gas line broke"). Queries with danger/damage/fear terms default to this.
        - **Priority**: If in doubt, use this priority: `safety` > `event` > `concept`.
 

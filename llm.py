@@ -130,7 +130,7 @@ def search_knowledge_base(query, limit=3):
         
         # Sort by score (descending) and take top results
         results.sort(key=lambda x: x['score'], reverse=True)
-        return results[:limit]
+        return results
 
     except Exception as e:
         print(f"Vector search failed: {e}")
@@ -183,7 +183,7 @@ def query_rag(user_query, history, api_key):
     
     # 4. Get Safety Docs via Vector Search
     # Increase limit to get a mix of PDF and Web results
-    raw_docs = search_knowledge_base(semantic_query, limit=5)
+    raw_docs = search_knowledge_base(semantic_query, limit=15)
     
     # Format Context based on Mode
     if mode == "concept":

@@ -33,6 +33,14 @@ client = MilvusClient("myshake.db")
 embedding_fn = model.DefaultEmbeddingFunction()  # sentence-transformers/all-MiniLM-L6-v2 - 256 token max
 max_tokens = 450
 
+# --- Memory Safety Limits ---
+MAX_QUEUE_SIZE = 5000
+MAX_HTML_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_CHUNKS_PER_PAGE = 200
+MAX_TEXT_PER_PAGE_CHARS = 100_000
+# ----------------------------
+
 def scrape(start_urls):
     if isinstance(start_urls, str):
         start_urls = [start_urls]
@@ -49,6 +57,10 @@ def scrape(start_urls):
     for url in start_urls:
         norm_url = normalize_url(url)
         if not is_url_known(norm_url):
+            # Enforce queue limit for start_urls
+            if len(queue) >= MAX_QUEUE_SIZE:
+                print(f"Queue full ({MAX_QUEUE_SIZE}), dropping start URL: {norm_url}")
+                continue
             add_url_to_db(norm_url, status=0) # 0 = Pending
             queue.append(norm_url)
     
@@ -69,11 +81,47 @@ def scrape(start_urls):
 
         print(f"Processing: {url}")
         try:
-            response = requests.get(url, timeout=10)
+            # Use stream=True to check headers and enforce size limits before full download
+            response = requests.get(url, timeout=10, stream=True)
             if response.status_code != 200:
                 print(f"Failed to fetch {url}: Status {response.status_code}")
                 mark_url_processed(url) 
                 continue
+            
+            # Determine limit based on expected content type (naive check)
+            # We'll refine this logic below, but strictly enforce a hard cap for safety.
+            limit = MAX_HTML_SIZE_BYTES
+            if ".pdf" in url:
+                limit = MAX_PDF_SIZE_BYTES
+            
+            # Check Content-Length header if present
+            content_length = response.headers.get('Content-Length')
+            if content_length and int(content_length) > limit:
+                print(f"Skipping {url}: Content-Length {content_length} exceeds limit {limit}")
+                mark_url_processed(url)
+                continue
+
+            # Safe read with strict bounding
+            content_buffer = io.BytesIO()
+            downloaded_size = 0
+            aborted = False
+            
+            for chunk in response.iter_content(chunk_size=8192):
+                downloaded_size += len(chunk)
+                if downloaded_size > limit:
+                    print(f"Aborting {url}: Download size exceeded limit {limit}")
+                    aborted = True
+                    break
+                content_buffer.write(chunk)
+            
+            if aborted:
+                mark_url_processed(url)
+                continue
+                
+            # Patch the response object with the safely downloaded content
+            # This ensures downstream code (response.text, etc.) works as expected
+            response._content = content_buffer.getvalue()
+            
         except Exception as e:
             print(f"Failed to fetch {url} at time [{str(datetime.datetime.now())}]: {e}")
             mark_url_processed(url)
@@ -117,8 +165,12 @@ def scrape(start_urls):
             
             if extract_domain(norm_href) == current_domain:
                 if not is_url_known(norm_href):
-                    add_url_to_db(norm_href, status=0) # Add as pending
-                    queue.append(norm_href)
+                    # Enforce queue limit
+                    if len(queue) >= MAX_QUEUE_SIZE:
+                        print(f"Queue full ({MAX_QUEUE_SIZE}), dropping discovered URL: {norm_href}")
+                    else:
+                        add_url_to_db(norm_href, status=0) # Add as pending
+                        queue.append(norm_href)
         
         # Mark current URL as processed
         mark_url_processed(url)
@@ -208,7 +260,13 @@ def process_scrape_pdf(resp):
         title = os.path.basename(resp.url)
 
     chunks = pdfprocessor.chunk_pdf(reader, resp.url, embedding_fn.tokenizer, max_tokens, title=title, author=author)
-    if chunks: 
+    
+    # Enforce chunk and text limits on the result
+    if chunks:
+        if len(chunks) > MAX_CHUNKS_PER_PAGE:
+            print(f"Truncating PDF chunks for {resp.url}: {len(chunks)} -> {MAX_CHUNKS_PER_PAGE}")
+            chunks = chunks[:MAX_CHUNKS_PER_PAGE]
+            
         db_store(chunks, COLLECTION_PDF)
     print(f"Processed PDF; URL: {resp.url}.")
 
@@ -238,6 +296,11 @@ def process_local_pdf(filepath):
 
         chunks = pdfprocessor.chunk_pdf(reader, file_uri, embedding_fn.tokenizer, max_tokens, title=title, author=author)
         if chunks:
+            # Enforce chunk limits for local PDFs too
+            if len(chunks) > MAX_CHUNKS_PER_PAGE:
+                print(f"Truncating local PDF chunks for {filepath}: {len(chunks)} -> {MAX_CHUNKS_PER_PAGE}")
+                chunks = chunks[:MAX_CHUNKS_PER_PAGE]
+
             db_store(chunks, COLLECTION_PDF)
             # Mark as processed only after successful store
             mark_url_processed(file_uri)
@@ -273,194 +336,257 @@ def chunk_soup(soup, url):
     2. Group content by heading (semantic chunking).
     3. Enforce a minimum token length for paragraphs by merging short, adjacent blocks.
     4. Handle max token length by splitting by sentence (with overlap) or list item.
+    5. Inject hierarchical context (Title > H1 > H2...) into every chunk.
+    6. [NEW] Recursive traversal to capture content from all block-level elements (div, table, etc.).
     """
     
     tokenizer = embedding_fn.tokenizer
-    MIN_TOKENS = 15  # New: Minimum token count for a valid content chunk
-    OVERLAP_SENTENCES = 2 # Overlap for paragraph splitting
-    OVERLAP_LIST_ITEMS = 3 # Overlap for list splitting
+    MIN_TOKENS = 15
+    OVERLAP_SENTENCES = 2
+    OVERLAP_LIST_ITEMS = 3
     
-    # --- Helper Functions (Minor adjustments for robustness) ---
+    # --- Helper Functions ---
     
     def count_tokens(text):
         return len(tokenizer.encode(text))
 
-    def split_paragraph(text, heading):
-        # Improved: Use OVERLAP_SENTENCES constant for look-back
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        chunks = []
-        curr = []
-        for sent in sentences:
-            curr.append(sent)
-            joined = heading + "\n" + " ".join(curr)
-            if count_tokens(joined) > max_tokens:
-                # If adding the new sentence makes it too long, package the previous content
-                # Overlap: Take the last OVERLAP_SENTENCES sentences as context for the next chunk
-                overlap_size = min(len(curr) - 1, OVERLAP_SENTENCES)
-                
-                prev_content = " ".join(curr[:-1]) # Content up to the sentence that made it too long
-                
-                # Check minimum length for the chunk being created
-                if count_tokens(prev_content) >= MIN_TOKENS:
-                     chunks.append(heading + "\n" + prev_content)
-                
-                # Start the next chunk with the overlap
-                curr = curr[-overlap_size:] # Start next chunk with the overlapping sentences
-                curr.append(sent) # Add the current sentence
-        
-        # Add the final buffer content if it meets min length
-        final_content = " ".join(curr)
-        if final_content and count_tokens(final_content) >= MIN_TOKENS:
-            chunks.append(heading + "\n" + final_content)
-        return chunks
+    def split_paragraph(text, context_str):
+        # Prepend context if not already present
+        full_text = text
+        if context_str and context_str not in text:
+            full_text = f"{context_str}\n{text}"
 
-    def split_list(items, heading, is_ordered):
-        # Improved: Use OVERLAP_LIST_ITEMS constant for look-back
+        sentences = re.split(r'(?<=[.!?])\s+', full_text.strip())
         chunks = []
         curr = []
-        for i, li in enumerate(items, start=1):
-            marker = f"{i}. " if is_ordered else "- "
-            curr.append(marker + li)
-            joined = heading + "\n" + "\n".join(curr)
+        
+        sentences_content = re.split(r'(?<=[.!?])\s+', text.strip())
+        
+        curr = []
+        for sent in sentences_content:
+            curr.append(sent)
+            # Check size with context
+            joined_content = " ".join(curr)
+            candidate = f"{context_str}\n{joined_content}" if context_str else joined_content
             
-            if count_tokens(joined) > max_tokens:
-                # If adding the new item makes it too long, package the previous content
-                overlap_size = min(len(curr) - 1, OVERLAP_LIST_ITEMS)
+            if count_tokens(candidate) > max_tokens:
+                # Backtrack
+                overlap_size = min(len(curr) - 1, OVERLAP_SENTENCES)
+                prev_content = " ".join(curr[:-1])
                 
-                prev_content = "\n".join(curr[:-1]) # Content up to the list item that made it too long
+                chunk_text = f"{context_str}\n{prev_content}" if context_str else prev_content
+                if count_tokens(chunk_text) >= MIN_TOKENS:
+                    chunks.append(chunk_text)
                 
-                # Check minimum length for the chunk being created
-                if count_tokens(prev_content) >= MIN_TOKENS:
-                    chunks.append(heading + "\n" + prev_content)
-                
-                # Start the next chunk with the overlap
-                curr = curr[-overlap_size:] 
-                curr.append(marker + li) # Add the current item
-                
-        # Add the final buffer content
-        final_content = "\n".join(curr)
-        if final_content and count_tokens(final_content) >= MIN_TOKENS:
-            chunks.append(heading + "\n" + final_content)
+                curr = curr[-overlap_size:]
+                curr.append(sent)
+        
+        final_content = " ".join(curr)
+        final_chunk = f"{context_str}\n{final_content}" if context_str else final_content
+        if final_content and count_tokens(final_chunk) >= MIN_TOKENS:
+            chunks.append(final_chunk)
+            
         return chunks
 
     def serialize_html(elements):
         return "".join(str(e) for e in elements)
     
-    # --- Pruning: Remove irrelevant nodes before processing ---
-    
-    # List of common tags/classes for navigation, ads, headers, and footers
+    # --- Pruning ---
     irrelevant_selectors = [
         'header', 'footer', 'nav', '.sidebar', '.ad', '.ads',
-        '#menu', '#navigation', '.skip-link',
+        '#menu', '#navigation', '.skip-link', 'script', 'style', 'noscript'
     ]
-    
     for selector in irrelevant_selectors:
         for element in soup.select(selector):
-            element.decompose() # Remove the element from the soup
+            element.decompose()
             
     # --- Main Chunker Logic ---
 
     all_chunks = []
-    current_heading = "Untitled Section"
-    buffer = []
-    buffer_html = []
     
-    # Now, find all content nodes after pruning
-    node_list = soup.find_all(["h1","h2","h3","h4","h5","h6","p","ul","ol"])
-    
-    # Extract site name (simple approximation)
-    site_name = urlparse(url).netloc
-
-    def flush_paragraph_buffer():
-        nonlocal buffer, buffer_html
-        if not buffer:
-            return []
-            
-        text = " ".join(buffer).strip()
+    # Extract Page Title
+    page_title = ""
+    if soup.title and soup.title.string:
+        page_title = soup.title.string.strip()
+    if not page_title:
+        page_title = urlparse(url).netloc
         
-        # New: Enforce MIN_TOKENS before splitting for max length
-        if count_tokens(text) < MIN_TOKENS and count_tokens(text) > 0:
-            # If the combined content is still too short, discard it as noise.
+    # Heading Stack: list of (level, text)
+    heading_stack = [] 
+    
+    buffer = [] # List of strings
+    
+    site_name = urlparse(url).netloc
+    total_chars_processed = 0
+
+    BLOCK_TAGS = {
+        "p", "div", "article", "section", "aside", "blockquote", "figure", 
+        "table", "ul", "ol", "dl", "form", "nav", "header", "footer", "address", "main"
+    }
+    
+    def get_current_context():
+        path = [page_title] + [h[1] for h in heading_stack]
+        return " > ".join(path)
+
+    def flush_buffer(force=False):
+        nonlocal buffer
+        if not buffer:
+            return
+
+        text = "".join(buffer).strip()
+        if not text:
             buffer = []
-            buffer_html = []
-            return []
-            
+            return
+
+        # If not forcing flush, and text is too short, keep accumulating
+        if not force and count_tokens(text) < MIN_TOKENS:
+            return
+
+        # Create chunks
+        context_str = get_current_context()
         out = []
-        if count_tokens(current_heading + "\n" + text) > max_tokens:
-            out = split_paragraph(text, current_heading)
+        
+        full_text = f"{context_str}\n{text}" if context_str else text
+        
+        if count_tokens(full_text) > max_tokens:
+            out = split_paragraph(text, context_str)
         else:
-            out = [current_heading + "\n" + text]
+            out = [full_text]
             
-        html_snippet = serialize_html(buffer_html)
+        current_heading = heading_stack[-1][1] if heading_stack else page_title
+        
+        for txt in out:
+            all_chunks.append({
+                "text": txt,
+                "url": url,
+                "heading": current_heading,
+                "site_name": site_name,
+                "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            })
+            
         buffer = []
-        buffer_html = []
-        return [(t, html_snippet) for t in out]
 
-    for el in node_list:
-        if el.name in ["h1","h2","h3","h4","h5","h6"]:
-            # 1. Flush previous content block
-            flushed = flush_paragraph_buffer()
-            for txt, html_snip in flushed:
-                all_chunks.append({
-                    "text": txt,
-                    "url": url,
-                    "heading": current_heading,
-                    "site_name": site_name,
-                    "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                })
-            # 2. Update heading for the next block
-            current_heading = el.get_text(strip=True) or "Untitled Section"
+    def ensure_newline():
+        if buffer and not buffer[-1].endswith("\n"):
+            buffer.append("\n")
 
-        elif el.name == "p":
-            txt = el.get_text(" ", strip=True)
-            # 3. Collect paragraphs in a buffer
-            if txt:
-                buffer.append(txt)
-                buffer_html.append(el)
+    def ensure_space():
+        if buffer and not buffer[-1].endswith(" ") and not buffer[-1].endswith("\n"):
+            buffer.append(" ")
 
-        elif el.name in ["ul","ol"]:
-            # 1. Flush previous paragraph buffer (if any)
-            flushed = flush_paragraph_buffer()
-            for txt, html_snip in flushed:
-                all_chunks.append({
-                    "text": txt,
-                    "url": url,
-                    "heading": current_heading,
-                    "site_name": site_name,
-                    "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                })
+    def traverse(node):
+        nonlocal total_chars_processed
+        
+        if len(all_chunks) >= MAX_CHUNKS_PER_PAGE:
+            return
+        if total_chars_processed >= MAX_TEXT_PER_PAGE_CHARS:
+            return
 
-            # 2. Process the list (which is now self-contained)
-            items = []
-            for li in el.find_all("li", recursive=False):
-                li_text = li.get_text(" ", strip=True)
-                if li_text:
-                     items.append(li_text)
+        if isinstance(node, NavigableString):
+            text = str(node)
+            if text.strip():
+                # Normalize whitespace slightly but keep structure? 
+                # For now, just append. split_paragraph handles internal spaces.
+                # But we want to avoid "wordword".
+                # If the previous node was a tag that didn't add space, we might need one.
+                # But usually HTML ignores newlines.
+                # Let's replace newlines with spaces in text nodes to be safe, 
+                # unless inside pre? (Ignoring pre for now).
+                clean_text = re.sub(r'\s+', ' ', text)
+                buffer.append(clean_text)
+                total_chars_processed += len(clean_text)
+            return
 
-            if items:
-                is_ordered = el.name == "ol"
-                list_chunks = split_list(items, current_heading, is_ordered)
-                html_snippet = serialize_html([el])
+        if isinstance(node, Tag):
+            # Headings
+            if node.name in ["h1","h2","h3","h4","h5","h6"]:
+                flush_buffer(force=True)
+                try:
+                    level = int(node.name[1])
+                    text = node.get_text(strip=True)
+                    if text:
+                        while heading_stack and heading_stack[-1][0] >= level:
+                            heading_stack.pop()
+                        heading_stack.append((level, text))
+                except:
+                    pass
+                # We don't recurse into headings for content, just use them as delimiters
+                return
+
+            # Block Tags
+            if node.name in BLOCK_TAGS:
+                ensure_newline()
+                flush_buffer(force=False) # Soft flush at start of block
                 
-                for chunk_text in list_chunks:
-                    all_chunks.append({
-                        "text": chunk_text,
-                        "url": url,
-                        "heading": current_heading,
-                        "site_name": site_name,
-                        "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    })
+                for child in node.children:
+                    traverse(child)
+                    
+                ensure_newline()
+                flush_buffer(force=False) # Soft flush at end of block
+                return
 
-    # 3. Final flush for any remaining buffered paragraphs
-    flushed = flush_paragraph_buffer()
-    for txt, html_snip in flushed:
-        all_chunks.append({
-            "text": txt,
-            "url": url,
-            "heading": current_heading,
-            "site_name": site_name,
-            "crawl_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        })
+            # List Items
+            if node.name == "li":
+                ensure_newline()
+                # Try to detect if ordered or unordered?
+                # Parent should be ul or ol.
+                marker = "- "
+                if node.parent and node.parent.name == "ol":
+                    # Find index
+                    # This is expensive, maybe just use "1. " or "- " always?
+                    # Let's just use "- " for simplicity or try to be smart.
+                    # Being smart might be slow.
+                    marker = "- " 
+                buffer.append(marker)
+                
+                for child in node.children:
+                    traverse(child)
+                return
+            
+            # Definition List Items
+            if node.name == "dt":
+                ensure_newline()
+                buffer.append("**") # Bold term
+                for child in node.children:
+                    traverse(child)
+                buffer.append("** ")
+                return
+            if node.name == "dd":
+                ensure_space()
+                for child in node.children:
+                    traverse(child)
+                return
+
+            # Table Rows/Cells
+            if node.name == "tr":
+                ensure_newline()
+                for child in node.children:
+                    traverse(child)
+                return
+            
+            if node.name in ["td", "th"]:
+                ensure_space()
+                for child in node.children:
+                    traverse(child)
+                buffer.append(" | ") # Visual separator for table cells
+                return
+
+            if node.name == "br":
+                buffer.append("\n")
+                return
+
+            # Inline / Other
+            for child in node.children:
+                traverse(child)
+
+    # Start traversal from body
+    if soup.body:
+        traverse(soup.body)
+    else:
+        traverse(soup)
+        
+    # Final flush
+    flush_buffer(force=True)
 
     return all_chunks
 
@@ -598,10 +724,10 @@ if __name__ == '__main__':
     init_collection()
     
     # #Process local PDFs first
-    pdf_files = glob.glob("docs/*.pdf")
-    print(f"Found {len(pdf_files)} local PDF files in docs/")
-    for pdf_file in pdf_files:
-        process_local_pdf(pdf_file)
+    # pdf_files = glob.glob("docs/*.pdf")
+    # print(f"Found {len(pdf_files)} local PDF files in docs/")
+    # for pdf_file in pdf_files:
+    #     process_local_pdf(pdf_file)
 
     u =["https://www.earthquakecountry.org/",
         "https://www.usgs.gov/programs/earthquake-hazards/faqs-category",
