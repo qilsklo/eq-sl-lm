@@ -29,7 +29,8 @@ COLLECTION_PDF = "myshake_pdf"
 COLLECTION_WEB = "myshake_web"
 processed_urls_collection = "processed_urls"
 
-client = MilvusClient("myshake.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "myshake.db")
+client = MilvusClient(DB_PATH)
 embedding_fn = model.DefaultEmbeddingFunction()  # sentence-transformers/all-MiniLM-L6-v2 - 256 token max
 max_tokens = 450
 

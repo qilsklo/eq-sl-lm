@@ -7743,7 +7743,7 @@
     "6000rvkl": {
       "event_id": "6000rvkl",
       "origin_time_utc": "2025-12-17T23:07:46.659000+00:00",
-      "last_updated_utc": "2025-12-17T23:38:21.808000+00:00",
+      "last_updated_utc": "2025-12-17T23:40:33.704000+00:00",
       "magnitude": 5.6,
       "magnitude_type": "mww",
       "depth_km": 10.259,
@@ -7753,7 +7753,7 @@
       "review_status": "reviewed",
       "tsunami_flag": false,
       "source": "USGS",
-      "version": 4
+      "version": 5
     },
     "2025yugqrt": {
       "event_id": "2025yugqrt",
@@ -7844,7 +7844,52 @@
       "tsunami_flag": false,
       "source": "USGS",
       "version": 1
+    },
+    "75281731": {
+      "event_id": "75281731",
+      "origin_time_utc": "2025-12-17T23:43:13.820000+00:00",
+      "last_updated_utc": "2025-12-17T23:44:49.850000+00:00",
+      "magnitude": 0.76,
+      "magnitude_type": "md",
+      "depth_km": 2.25999999046326,
+      "latitude": 38.8241653442383,
+      "longitude": -122.846168518066,
+      "place_description": "9 km NW of The Geysers, CA",
+      "review_status": "automatic",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "75281726": {
+      "event_id": "75281726",
+      "origin_time_utc": "2025-12-17T23:42:59.910000+00:00",
+      "last_updated_utc": "2025-12-17T23:44:35.022000+00:00",
+      "magnitude": 1.01,
+      "magnitude_type": "md",
+      "depth_km": 1.95000004768372,
+      "latitude": 38.8310012817383,
+      "longitude": -122.818496704102,
+      "place_description": "8 km NW of The Geysers, CA",
+      "review_status": "automatic",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
+    },
+    "93952651": {
+      "event_id": "93952651",
+      "origin_time_utc": "2025-12-17T08:24:38.240000+00:00",
+      "last_updated_utc": "2025-12-17T23:47:07.790000+00:00",
+      "magnitude": -0.05,
+      "magnitude_type": "ml",
+      "depth_km": 7.26,
+      "latitude": 53.8976666666667,
+      "longitude": -166.645333333333,
+      "place_description": "6 km W of Dutch Harbor, Alaska",
+      "review_status": "reviewed",
+      "tsunami_flag": false,
+      "source": "USGS",
+      "version": 1
     }
   },
-  "last_saved": "2025-12-17T23:39:57.326151+00:00"
+  "last_saved": "2025-12-17T23:48:34.483175+00:00"
 }

@@ -52,7 +52,6 @@ def get_api_key():
 
 import earthquake_data
 
-import earthquake_data
 
 def get_search_params(user_query, api_key):
     """
