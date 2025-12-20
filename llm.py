@@ -214,6 +214,9 @@ def query_rag(user_query, history, api_key):
         user_lat=user_coordinates[0] if user_coordinates else None,
         user_lon=user_coordinates[1] if user_coordinates else None
     )
+    
+    # Inject reference location so LLM knows what "distance_to_user_km" is relative to
+    context_data["reference_location"] = search_params.get("user_location") or "your location"
     event_context_json = json.dumps(context_data, indent=2)
     
     # 4. Get Safety Docs via Vector Search

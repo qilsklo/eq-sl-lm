@@ -21,8 +21,6 @@ from collections import deque
 
 import datetime
 
-MONTH_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_month.geojson"
-HOUR_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_hour.geojson"
 
 # Collection Names
 COLLECTION_PDF = "myshake_pdf"
@@ -759,6 +757,7 @@ if __name__ == '__main__':
         "https://www.caloes.ca.gov/",
         "https://www.gdacs.org/",
         "https://www.ifrc.org/earthquake",
+        "https://www.usgs.gov/programs/earthquake-hazards/science/20-largest-earthquakes-world-1900"
         ]
     
     scrape(u)
