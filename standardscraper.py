@@ -757,7 +757,10 @@ if __name__ == '__main__':
         "https://www.caloes.ca.gov/",
         "https://www.gdacs.org/",
         "https://www.ifrc.org/earthquake",
-        "https://www.usgs.gov/programs/earthquake-hazards/science/20-largest-earthquakes-world-1900"
+        "https://www.usgs.gov/programs/earthquake-hazards/science/20-largest-earthquakes-world-1900",
+        "https://earthquake.usgs.gov/learn/today/",
+        "https://www.usgs.gov/programs/earthquake-hazards/science/faqs",
+        
         ]
     
     scrape(u)

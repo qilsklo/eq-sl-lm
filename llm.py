@@ -175,14 +175,8 @@ def query_rag(user_query, history, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.0-flash')
     
-    # 1. Fetch latest data (simple polling simulation: fetch on query)
-    try:
-        new_events = earthquake_data.manager.fetch_feed("all_day")
-        earthquake_data.manager.process_features(new_events)
-    except Exception as e:
-        print(f"Error updating feed: {e}")
 
-    # 2. Get Search Params
+    # 1. Get Search Params (Moved up to determine data needs)
     search_params = get_search_params(user_query, api_key)
     start_date = search_params.get("start_date")
     end_date = search_params.get("end_date")
@@ -190,6 +184,30 @@ def query_rag(user_query, history, api_key):
     user_coordinates = search_params.get("user_coordinates")
     mode = search_params.get("mode", "event") # Default to event
     
+    # 2. Fetch latest data based on time range
+    feed_to_fetch = "all_day"
+    if start_date:
+        try:
+            start_dt = datetime.datetime.fromisoformat(start_date)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=datetime.timezone.utc)
+            
+            now = datetime.datetime.now(datetime.timezone.utc)
+            delta = now - start_dt
+            
+            if delta > datetime.timedelta(days=7):
+                feed_to_fetch = "all_month"
+            elif delta > datetime.timedelta(days=1):
+                feed_to_fetch = "all_week"
+        except ValueError:
+            pass # Keep default
+
+    try:
+        new_events = earthquake_data.manager.fetch_feed(feed_to_fetch)
+        earthquake_data.manager.process_features(new_events)
+    except Exception as e:
+        print(f"Error updating feed: {e}")
+
     # Default to UC Berkeley if no location specified
     if not user_coordinates:
         user_coordinates = [37.8715, -122.2730]
@@ -212,7 +230,8 @@ def query_rag(user_query, history, api_key):
         start_date=start_date,
         end_date=end_date,
         user_lat=user_coordinates[0] if user_coordinates else None,
-        user_lon=user_coordinates[1] if user_coordinates else None
+        user_lon=user_coordinates[1] if user_coordinates else None,
+        limit=50
     )
     
     # Inject reference location so LLM knows what "distance_to_user_km" is relative to
