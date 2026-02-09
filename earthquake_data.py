@@ -180,7 +180,7 @@ class EarthquakeManager:
         except Exception as e:
             print(f"Error saving cache: {e}")
 
-    def fetch_feed(self, feed="all_day"):
+    def fetch_feed(self, feed="2.5_day"):
         url = f"{USGS_API_BASE}/{feed}.geojson"
         try:
             resp = requests.get(url, timeout=10)

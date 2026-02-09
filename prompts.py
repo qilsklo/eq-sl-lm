@@ -12,10 +12,13 @@ SEARCH_PARAM_PROMPT = """You are an expert RAG query planner. Your task is to an
     5. If the user mentions their location (e.g., "I'm in Berkeley", "near San Francisco"), extract `user_location` (string) and estimate `user_coordinates` [lat, lon] using your internal knowledge. If no location is mentioned, these should be null.
     6. `semantic_query` is the text part of the query, stripped of date/mag/location references if possible. If the query contains typos, colloquialisms, initialisms, or acronyms, expand them to their full, academic form. For instance, the "SF EQ" refers to the "San Francisco earthquake".
     7. **Mode Classification**: Classify the query into exactly one of the following modes:
-       - "event": User is asking about a specific earthquake or recent seismic activity (e.g., "What just happened?", "Any quakes today?"). Short queries default to this.
+       - "event": User is asking about a specific earthquake or recent seismic activity (e.g., "What just happened?", "Any quakes today?").
        - "concept": User is asking for an explanation of a scientific concept or topic (e.g., "How do aftershocks work?", "What is tomography?"). Queries with "what is", "how does" default to this. The topic may be an older earthquake. For instance, a question about the "1868 San Francisco earthquake" should be classified as "concept".
        - "safety": User is asking what to do, how to respond, or about safety/danger (e.g., "What should I do?", "Gas line broke"). Queries with danger/damage/fear terms default to this.
-       - **Priority**: If in doubt, use this priority: `safety` > `event` > `concept`.
+       - **Priority**: If in doubt, use this priority: `content` > `safety` > `event`.
+       - You should apply a great deal of your own intelligence by anticipating what the user wants and giving it to them. For instance, a query that says "tell me about the Kamchatka earthquake last year" is likely to be a content query because it is so old. The user probably wants an educational understanding of the earthquake rather than a literal "what just happened" type of understanding.
+       - Will myshake alert me when I am in do not disturb mode: concept.
+       
 
     Output JSON only:
     {{

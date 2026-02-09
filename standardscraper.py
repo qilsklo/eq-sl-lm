@@ -742,11 +742,11 @@ if __name__ == '__main__':
 
     init_collection()
     
-    # #Process local PDFs first
-    # pdf_files = glob.glob("docs/*.pdf")
-    # print(f"Found {len(pdf_files)} local PDF files in docs/")
-    # for pdf_file in pdf_files:
-    #     process_local_pdf(pdf_file)
+    #Process local PDFs first
+    pdf_files = glob.glob("docs/*.pdf")
+    print(f"Found {len(pdf_files)} local PDF files in docs/")
+    for pdf_file in pdf_files:
+        process_local_pdf(pdf_file)
 
     u =["https://www.earthquakecountry.org/",
         "https://www.usgs.gov/programs/earthquake-hazards/faqs-category",
@@ -760,7 +760,7 @@ if __name__ == '__main__':
         "https://www.usgs.gov/programs/earthquake-hazards/science/20-largest-earthquakes-world-1900",
         "https://earthquake.usgs.gov/learn/today/",
         "https://www.usgs.gov/programs/earthquake-hazards/science/faqs",
-        
+        "https://wgcep.org/UCERF3"        
         ]
     
     scrape(u)

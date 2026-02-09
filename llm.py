@@ -58,7 +58,7 @@ def get_search_params(user_query, api_key):
     Uses LLM to extract search parameters (date, magnitude, etc.) from the query.
     """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
     prompt = prompts.SEARCH_PARAM_PROMPT.format(
@@ -173,7 +173,7 @@ def search_knowledge_base(query, limit=15):
 
 def query_rag(user_query, history, api_key):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
 
     # 1. Get Search Params (Moved up to determine data needs)
